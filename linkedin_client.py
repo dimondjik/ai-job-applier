@@ -13,5 +13,6 @@ class LinkedInClient:
         search_url_list = self.browser_client.make_search_urls()
         for search_url in search_url_list:
             for job in self.browser_client.get_jobs_from_search_url(search_url):
+                self.browser_client.get_job_description_and_hiring_team(job)
                 print(job)
         wait_extra()
