@@ -45,9 +45,6 @@ JOB_TYPE = {"full_time": "F",
             "other": "O"}
 # ----------------------------------------------------------------------------------------------------------------------
 
-# # Chance to scroll up instantly
-# SCROLL_JUMP_UP_CHANCE = 0.4
-
 SCROLL_DELAY_RANGE = (1., 2.)
 JOB_LIST_LOAD_TIMEOUT = 8
 JOB_LIST_RETRY_DELAY_RANGE = (1., 2.)
@@ -112,12 +109,6 @@ class BrowserClient:
             os.mkdir(self.chrome_folder)
         if not os.path.exists(self.profile_folder):
             os.mkdir(self.profile_folder)
-
-    # No need to wait for page (https://stackoverflow.com/a/26567563)
-    # def __wait_page_load(self, timeout=5):
-    #     logger.info("Waiting for page to load...")
-    #     return wait_for_extra(lambda: 'complete' == self.driver.execute_script('return document.readyState;'),
-    #                           timeout=timeout)
 
     def make_search_urls(self):
         """
@@ -311,76 +302,6 @@ class BrowserClient:
 
         return True
 
-    # Turns out the page layout knows about its elements! So it's sufficient to just scroll element in view
-    # No need to scroll up and down
-
-    # def __set_scroll_position(self, element, pos):
-    #     """
-    #     Setting scroll position in scrollable element using javascript
-    #
-    #     Consider adding some delay after executing this method, to let page load
-    #
-    #     :param element: element on page to scroll
-    #     :param pos: position of scrollbar
-    #     """
-    #
-    #     self.driver.execute_script("arguments[0].scrollTop = arguments[1]", element, pos)
-
-    # def __scroll(self, element, scroll_max=0, reverse=False):
-    #     """
-    #     Gradually scrolling element up or down
-    #
-    #     :param element: element on page to scroll
-    #     :param scroll_max: max scroll height, MUST be specified when reverse = True
-    #     :param reverse: scrolling down when False, scrolling up if True
-    #
-    #     :return: actual scrollable element height
-    #     """
-    #     # Javascript code below is setting scroll to certain distance from top,
-    #     # so we're setting this depending on reverse flag
-    #     desired_distance = (scroll_max if reverse else 0)
-    #
-    #     if desired_distance <= 0 and reverse:
-    #         logger.error("Reverse scroll is set, but starting point is invalid (scroll_max <= 0)!")
-    #         raise AssertionError("Reverse scroll is set, but starting point is invalid (scroll_max <= 0)!")
-    #
-    #     logger.info("Scrolling job list up") if reverse else logger.info("Scrolling job list down")
-    #
-    #     # Switch to let the page one last chance to load before comparing actual and desired scroll
-    #     last_chance = False
-    #
-    #     while True:
-    #         # Random step for scrolling to look more natural
-    #         step = random.randint(100, 200)
-    #         # If reverse we are subtracting step, else adding
-    #         desired_distance += -step if reverse else step
-    #
-    #         self.__set_scroll_position(element, desired_distance)
-    #
-    #         # Getting actual distance
-    #         actual_distance = int(element.get_attribute("scrollTop"))
-    #
-    #         # If successfully scrolled - reset last chance switch
-    #         if actual_distance == desired_distance:
-    #             last_chance = False
-    #
-    #         # If it is not equal to desired distance and already given last chance - we reached the scroll end
-    #         elif actual_distance != desired_distance and last_chance:
-    #             logger.info("Reached the end")
-    #             return actual_distance
-    #
-    #         else:
-    #             # Giving last chance
-    #             last_chance = True
-    #             logger.info("Giving the page extra time to load")
-    #             # Step back
-    #             desired_distance += step if reverse else -step
-    #             # Extra delay to let page load
-    #             wait_extra(extra_range_sec=(1., 2.))
-    #
-    #         # A little faster than default
-    #         wait_extra(extra_range_sec=(1., 2.))
-
     def __scroll_to_element(self, element):
         """
         Scroll do desired element, plus some wait to let the lement load
@@ -452,16 +373,6 @@ class BrowserClient:
             return []
         except NoSuchElementException:
             pass
-
-        # # Scroll down to load all jobs on that page
-        # element_height = self.__scroll(jobs_list_element)
-        #
-        # # Scroll up, introducing some random chance to jump up (in case LinkedIn tracks that somehow)
-        # if random.uniform(0., 1.) < SCROLL_JUMP_UP_CHANCE:
-        #     self.__set_scroll_position(jobs_list_element, 0)
-        #     wait_extra(extra_range_sec=(1., 2.))
-        # else:
-        #     self.__scroll(jobs_element, scroll_max=element_height, reverse=True)
 
         jobs_count = len(self.__get_job_items())
 
