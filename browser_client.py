@@ -49,8 +49,12 @@ JOB_TYPE = {"full_time": "F",
 
 JOB_LIST_LOAD_TIMEOUT = 8
 JOB_LIST_RETRY_DELAY_RANGE = (1., 2.)
+JOB_LIST_CLICK_DELAY = (1., 2.)
 
-JOB_CLICK_DELAY = (1., 2.)
+EASY_APPLY_FORM_TIMEOUT = 8
+EASY_APPLY_FORM_DELAY = (1., 2.)
+
+EASY_APPLY_FORM_CHECK_DELAY = (1., 2.)
 
 
 class BrowserClient:
@@ -281,7 +285,7 @@ class BrowserClient:
         wait_extra()
         return True
 
-    def linkedin_open_feed(self):
+    def open_feed(self):
         """
         Open LinkedIn feed, the starting point for bot
 
@@ -326,7 +330,7 @@ class BrowserClient:
         # # Let the element load
         # wait_extra(extra_range_sec=SCROLL_DELAY_RANGE)
 
-    def __get_job_items(self, max_retries=3):
+    def __get_jobs_list(self, max_retries=3):
         """
         Get job items on page, retry until two list lengths will be equal (to let all entries on the layout to load)
         :param max_retries: max retries to compare list lengths
@@ -391,43 +395,24 @@ class BrowserClient:
         except NoSuchElementException:
             pass
 
-        jobs_count = len(self.__get_job_items())
+        jobs_count = len(self.__get_jobs_list())
 
         logger.info(f"Jobs on page: {jobs_count}")
 
-        # # Extracted data from jobs list
-        # jobs_data = []
-
         for i in range(jobs_count):
-            # Double getting job items, since when we scroll some elements go stale,
-            # because they are updated with job info by website
-            job_item = self.__get_job_items()[i]
+            # Double getting job items, since when we scroll and thus some elements go stale,
+            # because they are updated with job info by the website
+            job_item = self.__get_jobs_list()[i]
 
             self.__scroll_to_element(job_item)
 
-            job_item = self.__get_job_items()[i]
+            job_item = self.__get_jobs_list()[i]
 
             # Click on job item
             self.actions.click(job_item).perform()
 
             # Let the right bar load
-            wait_extra(extra_range_sec=JOB_CLICK_DELAY)
-
-            # # Append dict to jobs list with info that we can get from the panel in jobs list element
-            # jobs_data.append({"title": job_item.find_element(By.XPATH,
-            #                                                  ".//a[contains(@class, \"job-card-list__title\")]"
-            #                                                  ).get_attribute("aria-label"),
-            #                   "link": job_item.find_element(By.XPATH,
-            #                                                 ".//a[contains(@class, \"job-card-list__title\")]"
-            #                                                 ).get_attribute("href"),
-            #                   "company": job_item.find_element(By.XPATH,
-            #                                                    ".//span[contains(@class, "
-            #                                                    "\"job-card-container__primary-description\")]"
-            #                                                    ).text,
-            #                   "location": job_item.find_element(By.XPATH,
-            #                                                     ".//li[contains(@class, "
-            #                                                     "\"job-card-container__metadata-item\")]"
-            #                                                     ).text})
+            wait_extra(extra_range_sec=JOB_LIST_CLICK_DELAY)
 
             # Don't really need another variable, this is just for logging purposes
             job_data = {"title": job_item.find_element(By.XPATH,
@@ -445,11 +430,8 @@ class BrowserClient:
                                                           "\"job-card-container__metadata-item\")]"
                                                           ).text}
 
-            # logger.info(f"Found job item: {jobs_data[-1]['title']} ({jobs_data[-1]['company']})")
             logger.info(f"Found job item: {job_data['title']} ({job_data['company']})")
             yield job_data
-
-        # return jobs_data
 
     def get_job_description_and_hiring_team(self, job_data):
         """
@@ -464,15 +446,87 @@ class BrowserClient:
 
         try:
             job_data["desc"] = self.driver.find_element(
-                By.XPATH, ".//article[contains(@class, \"jobs-description__container\")]").text
+                By.XPATH, "//article[contains(@class, \"jobs-description__container\")]").text
         except NoSuchElementException:
             logger.error("Something is completely wrong, we didn't find job description")
             raise Exception("Something is completely wrong, we didn't find job description")
 
         try:
             job_data["hr"] = self.driver.find_element(
-                By.XPATH, ".//div[contains(@class, \"hirer-card__hirer-information\")]"
+                By.XPATH, "//div[contains(@class, \"hirer-card__hirer-information\")]"
                           "/a[contains(@href, \"https://www.linkedin.com/\")]").get_attribute("href")
         except NoSuchElementException:
             logger.info("We didn't find hiring team link, skipping that")
             pass
+
+    def can_submit(self):
+        pass
+
+    def get_easy_apply_form(self):
+        """
+        Locate and click Easy Apply button on this page, wait for form to load
+
+        :return: Opened form element object on this page
+        """
+
+        ignored_exceptions = (NoSuchElementException, StaleElementReferenceException)
+
+        self.actions.click(
+            self.driver.find_element(
+                By.XPATH, "//button[contains(@class, \"jobs-apply-button\") and ./span[contains(., \"Easy Apply\")]]")).perform()  # noqa
+
+        form_element = WebDriverWait(self.driver, EASY_APPLY_FORM_TIMEOUT, ignored_exceptions=ignored_exceptions).until(
+            ec.visibility_of_element_located((By.XPATH, "//div[contains(@class, \"jobs-easy-apply-modal\")]")))
+
+        logger.info("Opening the Easy Apply form")
+
+        wait_extra(extra_range_sec=EASY_APPLY_FORM_DELAY)
+
+        return form_element
+
+    @staticmethod
+    def get_form_fields(form_element):
+        """
+        Getting field label, type and additional data (e.g. if that's a list)
+
+        THIS IS A GENERATOR FUNCTION!
+
+        :param form_element: Form element to breakdown
+        :return: Single form element's label, type and data, get next one with explicit or implicit next() call
+        """
+        easy_apply_form_fields = form_element.find_elements(
+            By.XPATH, "//div[contains(@class, \"jobs-easy-apply-form-element\")]")
+
+        for form_field in easy_apply_form_fields:
+            wait_extra(extra_range_sec=EASY_APPLY_FORM_CHECK_DELAY)
+
+            try:
+                # Trying to get label with first span with text, that would be our form field label
+                form_field_label = form_field.find_element(
+                    By.XPATH, ".//label/span[1]").text
+            except NoSuchElementException:
+                # But for SOME reason "Mobile phone number"'s label is on different path
+                try:
+                    form_field_label = form_field.find_element(
+                        By.XPATH, ".//label").text
+                except NoSuchElementException:
+                    logger.error("Couldn't find form field label!")
+                    raise Exception("Couldn't find form field label!")
+
+            # Determining type of field
+            try:
+                # Is this a list? Trying to find list
+                form_field.find_element(By.XPATH, ".//select")
+                form_field_type = "list"
+                field_answer_list = [o.get_attribute("value") for o in form_field.find_elements(By.XPATH, ".//select/option")]
+            except NoSuchElementException:
+                try:
+                    # Is this an input field? Trying to find input
+                    form_field.find_element(By.XPATH, ".//input")
+                    form_field_type = "input"
+                    field_answer_list = []
+                except NoSuchElementException:
+                    logger.error("Unknown field type!")
+                    raise Exception("Unknown field type!")
+
+            yield form_field_label, form_field_type, field_answer_list
