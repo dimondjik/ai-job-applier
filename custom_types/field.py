@@ -14,5 +14,6 @@ class Field:
 class FieldTypeEnum(Enum):
     INPUT = 1
     LIST = 2
-    UPLOAD = 3
-    RADIO = 4
+    UPLOAD_CV = 3
+    UPLOAD_COVER = 4
+    RADIO = 5

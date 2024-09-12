@@ -18,6 +18,11 @@ from custom_types.job import Job
 from custom_types.field import Field, FieldTypeEnum
 import random
 
+from custom_exceptions import (LoginFailException,
+                               JobListException,
+                               EasyApplyException,
+                               EasyApplyExceptionData)
+
 logger = logging.getLogger("BrowserClient")
 
 # Dicts to convert human-readable values to query string values when filtering
@@ -50,7 +55,7 @@ JOB_TYPE = {"full_time": "F",
             "other": "O"}
 # ----------------------------------------------------------------------------------------------------------------------
 
-# SCROLL_DELAY_RANGE = (1., 2.)
+SCROLL_DELAY = (2., 4.)
 
 JOB_LIST_LOAD_TIMEOUT = 8
 JOB_LIST_RETRY_DELAY = (1., 2.)
@@ -69,6 +74,8 @@ EASY_APPLY_SUBMIT_FINAL_DELAY = (4., 6.)
 EASY_APPLY_SUBMIT_STEP_DELAY = (2., 4.)
 EASY_APPLY_POPUP_DETECT_TIMEOUT = 6
 
+BAIL_OUT_STEP_DELAY = (2., 4.)
+
 
 class BrowserClient:
     def __init__(self):
@@ -77,6 +84,9 @@ class BrowserClient:
 
         Will initialize Web Driver, and launch Chrome if everything succeeded
         """
+
+        # TODO: Catch error when browser failed to initialize
+
         self.config = ConfigManager()
 
         # Pointing Chrome data in current working directory
@@ -121,7 +131,10 @@ class BrowserClient:
 
         self.__logged_in = False
 
-        logger.debug("Browser client created")
+        # Mainly for logging purposes
+        self.current_job = None
+
+        logger.info("Chrome driver created")
 
     def __create_profile_folder(self) -> None:
         """
@@ -268,40 +281,38 @@ class BrowserClient:
 
         return search_link_list
 
-    def __linkedin_log_in(self) -> bool:
+    def __linkedin_log_in(self) -> None:
         """
         Login into LinkedIn using credentials from secrets.yaml
 
         MUST be called on login page!
-
-        :return: Result of trying to log in
         """
-        logger.debug("Checking if that's the login page")
+
         try:
             sign_in_button = self.driver.find_element(By.XPATH, "//button[@aria-label=\"Sign in\"]")
-            logger.debug("That's the login page")
         except NoSuchElementException:
-            logger.error("Couldn't confirm that this is the login page!")
-            return False
+            raise LoginFailException(
+                "Login function called on non-login page ({})".format(self.driver.current_url))
 
-        logger.debug("Entering credentials")
         try:
             email_field = self.driver.find_element(By.XPATH, "//input[@id=\"username\"]")
             email_field.send_keys(self.config.linkedin_email)
-            wait_extra()
+            wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
         except NoSuchElementException:
-            logger.debug("Couldn't find \"Email or phone\" field. Assuming only password needed")
+            logger.info("Can't find \"Email or phone\" field. Assuming only password is needed")
 
-        password_field = self.driver.find_element(By.XPATH, "//input[@id=\"password\"]")
-        password_field.send_keys(self.config.linkedin_pass)
-        wait_extra()
+        try:
+            password_field = self.driver.find_element(By.XPATH, "//input[@id=\"password\"]")
+            password_field.send_keys(self.config.linkedin_pass)
+            wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
+        except NoSuchElementException:
+            raise LoginFailException(
+                "Can't find \"Password\" field ({})".format(self.driver.current_url))
 
         sign_in_button.click()
-        logger.debug("Sigh in button pressed")
-        wait_extra()
-        return True
+        wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
 
-    def initialize(self) -> bool:
+    def initialize(self) -> None:
         """
         Open LinkedIn feed, the starting point for bot
 
@@ -315,27 +326,19 @@ class BrowserClient:
 
         if not self.__logged_in:
             if self.driver.current_url != "https://www.linkedin.com/feed/":
-                logger.debug("We have been redirected")
-                logger.debug("Assuming that is the login page")
-                if not self.__linkedin_log_in():
-                    logger.error("Redirected to somewhere else from the feed when not logged in!")
-                    return False
-                else:
-                    self.__logged_in = True
-                    logger.info("Logged in!")
+                logger.info("Not logged in")
+                self.__linkedin_log_in()
+                self.__logged_in = True
+                logger.info("Logged in!")
             else:
                 self.__logged_in = True
                 logger.info("Already logged in!")
         else:
             logger.info("Already logged in!")
 
-        return True
-
     def __scroll_to_element(self, element: WebElement) -> None:
         """
         Scroll do desired element
-
-        (As of now - no delay, leaving just in case it appears again, ignore next sentence)
 
         Plus some wait to let the element load
 
@@ -343,9 +346,8 @@ class BrowserClient:
         """
         logger.debug("Scrolling to an element")
         self.actions.scroll_to_element(element).perform()
-        # Does it really need a delay? Since we have delay in __get_job_items
-        # # Let the element load
-        # wait_extra(extra_range_sec=SCROLL_DELAY_RANGE)
+        # Let the element load
+        wait_extra(extra_range_sec=SCROLL_DELAY)
 
     def __get_jobs_list(self, max_retries: int = 3) -> list[WebElement]:
         """
@@ -357,37 +359,49 @@ class BrowserClient:
         """
         ignored_exceptions = (NoSuchElementException, StaleElementReferenceException)
 
-        logger.debug("Getting initial job list length")
+        logger.debug("Getting job list")
 
-        prev_jobs_count = len(WebDriverWait(self.driver,
-                                            JOB_LIST_LOAD_TIMEOUT,
-                                            ignored_exceptions=ignored_exceptions).until(
-            ec.visibility_of_all_elements_located((By.XPATH,
-                                                   "//div[contains(@class, "
-                                                   "\"jobs-search-results-list\")]"
-                                                   "/ul[contains(@class, "
-                                                   "\"scaffold-layout__list-container\")]"
-                                                   "/li[contains(@class, "
-                                                   "\"jobs-search-results__list-item\")]"))))
-        retries = 0
-
-        while retries < max_retries:
-            wait_extra(extra_range_sec=JOB_LIST_RETRY_DELAY)
-            jobs_list = WebDriverWait(self.driver,
-                                      JOB_LIST_LOAD_TIMEOUT,
-                                      ignored_exceptions=ignored_exceptions).until(
+        try:
+            prev_jobs_count = len(WebDriverWait(self.driver,
+                                                JOB_LIST_LOAD_TIMEOUT,
+                                                ignored_exceptions=ignored_exceptions).until(
                 ec.visibility_of_all_elements_located((By.XPATH,
                                                        "//div[contains(@class, "
                                                        "\"jobs-search-results-list\")]"
                                                        "/ul[contains(@class, "
                                                        "\"scaffold-layout__list-container\")]"
                                                        "/li[contains(@class, "
-                                                       "\"jobs-search-results__list-item\")]")))
+                                                       "\"jobs-search-results__list-item\")]"))))
+        except TimeoutException:
+            raise JobListException(
+                "Job search result list not found ({})"
+                .format(self.driver.current_url))
+
+        retries = 0
+
+        while retries < max_retries:
+            wait_extra(extra_range_sec=JOB_LIST_RETRY_DELAY)
+
+            try:
+                jobs_list = WebDriverWait(self.driver,
+                                          JOB_LIST_LOAD_TIMEOUT,
+                                          ignored_exceptions=ignored_exceptions).until(
+                    ec.visibility_of_all_elements_located((By.XPATH,
+                                                           "//div[contains(@class, "
+                                                           "\"jobs-search-results-list\")]"
+                                                           "/ul[contains(@class, "
+                                                           "\"scaffold-layout__list-container\")]"
+                                                           "/li[contains(@class, "
+                                                           "\"jobs-search-results__list-item\")]")))
+            except TimeoutException:
+                raise JobListException(
+                    "Job search result list not found ({})"
+                    .format(self.driver.current_url))
 
             if len(jobs_list) == prev_jobs_count:
                 return jobs_list
             else:
-                logger.debug(f"Job list lengths are not equal ({retries + 1})...")
+                logger.debug(f"Job list lengths are not equal ({retries + 1})")
                 prev_jobs_count = len(jobs_list)
                 retries += 1
 
@@ -411,7 +425,7 @@ class BrowserClient:
             # means that something is found
             self.driver.find_element(By.CLASS_NAME, "jobs-search-no-results-banner")
             logger.info("No jobs found")
-            return None
+            yield None
         except NoSuchElementException:
             pass
 
@@ -422,23 +436,22 @@ class BrowserClient:
         for i in range(jobs_count):
             # Double getting job items, since when we scroll some elements go stale,
             # because they are updated with job info by the website
+
+            # TODO: Removed second check, hope that LinkedIn would give info about next job in time
+
             job_item = self.__get_jobs_list()[i]
 
             self.__scroll_to_element(job_item)
 
-            job_item = self.__get_jobs_list()[i]
+            # job_item = self.__get_jobs_list()[i]
 
-            logger.debug("Clicking on job in the list")
+            logger.debug("Clicked on the job in the list")
 
             # Click on job item
             self.actions.click(job_item).perform()
 
             # Let the right bar load
             wait_extra(extra_range_sec=JOB_LIST_CLICK_DELAY)
-
-            logger.debug("Getting job info")
-
-            # TODO: Do something when not able to get job info
 
             try:
                 # Don't really need another variable, this is just for logging purposes
@@ -466,13 +479,16 @@ class BrowserClient:
                     job_data.applied = False
 
             except NoSuchElementException:
-                logger.error("Something is completely wrong, we couldn't get job info!")
-                raise Exception("Something is completely wrong, we couldn't get job info!")
+                raise JobListException("Cannot get job info ({})".format(self.driver.current_url))
 
             logger.info(f"Found job item: {job_data.title} ({job_data.company})")
+
+            # Mainly for logging purposes
+            self.current_job = job_data
+
             yield job_data
 
-        return None
+        yield None
 
     def get_job_description_and_hiring_team(self, job_data: Job) -> None:
         """
@@ -487,24 +503,24 @@ class BrowserClient:
         :param job_data: Job object to expand
         """
 
-        logger.debug("Expanding Job with description and hiring team")
-
-        # TODO: Job description not found should be non-critical
+        logger.debug("Adding description and HR link to Job object")
 
         try:
             job_data.desc = self.driver.find_element(
                 By.XPATH, "//article[contains(@class, \"jobs-description__container\")]").text
         except NoSuchElementException:
-            logger.error("Something is completely wrong, we didn't find job description!")
-            raise Exception("Something is completely wrong, we didn't find job description!")
+            raise JobListException("Can't find job description ({})".format(self.current_job.link))
 
         try:
             job_data.hr = self.driver.find_element(
                 By.XPATH, "//div[contains(@class, \"hirer-card__hirer-information\")]"
                           "/a[contains(@href, \"https://www.linkedin.com/\")]").get_attribute("href")
         except NoSuchElementException:
-            logger.debug("We didn't find hiring team link, skipping that")
+            logger.debug("Can't find HR link, that's not essential")
             pass
+
+        # Mainly for logging purposes
+        self.current_job = job_data
 
     def __advance_easy_apply_form(self) -> WebElement | None:
         """
@@ -533,11 +549,14 @@ class BrowserClient:
         except NoSuchElementException:
             return None
 
-    def finalize_easy_apply(self) -> bool:
-        # TODO: Documentation
+    def finalize_easy_apply(self) -> None:
+        """
+        Finalize job application, call this function at the last step when Review button appear
+        """
         try:
             ignored_exceptions = (NoSuchElementException, StaleElementReferenceException)
 
+            # Click Review button
             self.actions.click(
                 self.driver.find_element(
                     By.XPATH, "//button[contains(@aria-label, \"Review your application\") "
@@ -549,44 +568,79 @@ class BrowserClient:
 
             wait_extra(extra_range_sec=EASY_APPLY_SUBMIT_STEP_DELAY)
 
+            # Unfollow company
             self.actions.click(
                 self.driver.find_element(
                     By.XPATH, "//input[@id=\"follow-company-checkbox\" and @type=\"checkbox\"]")).perform()
 
             wait_extra(extra_range_sec=EASY_APPLY_SUBMIT_STEP_DELAY)
 
+            # Submit
             self.actions.click(
                 self.driver.find_element(
                     By.XPATH, "//button[contains(@aria-label, \"Submit application\") "
                               "and ./span[contains(., \"Submit application\")]]")).perform()
 
+            # Wait for something to pop up
             wait_extra(extra_range_sec=EASY_APPLY_SUBMIT_FINAL_DELAY)
 
             try:
-                # If something popped up
+                # Wait for something to pop up of a dialog class
                 any_dialog = WebDriverWait(self.driver, EASY_APPLY_POPUP_DETECT_TIMEOUT,
                                            ignored_exceptions=ignored_exceptions).until(
                     ec.visibility_of_element_located((By.XPATH, "//div[@role=\"dialog\"]")))
 
-                logger.info("Something popped up")
-
+                # Closing popup dialog
                 self.actions.click(
                     any_dialog.find_element(
                         By.XPATH, ".//button[@aria-label=\"Dismiss\"]")).perform()
 
                 logger.info("Successfully closed popup")
             except TimeoutException:
-                logger.debug("Pop up not present, that's fine")
+                pass
 
-            logger.info("Finalized the job application")
+            logger.info(f"Successful {self.current_job.title} application at {self.current_job.company}!")
 
             wait_extra(extra_range_sec=EASY_APPLY_SUBMIT_STEP_DELAY)
 
-            return True
-
         except NoSuchElementException:
-            logger.error("Couldn't finalize job application!")
-            return False
+            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
+                                                    job_link=self.current_job.link,
+                                                    reason="Can't finalize Easy Apply")
+            raise EasyApplyException("Can't finalize Easy Apply", exception_data)
+
+    def bail_out(self):
+        try:
+            ignored_exceptions = (NoSuchElementException, StaleElementReferenceException)
+
+            # Find form element
+            form_element = WebDriverWait(self.driver, EASY_APPLY_FORM_TIMEOUT,
+                                         ignored_exceptions=ignored_exceptions).until(
+                ec.visibility_of_element_located((By.XPATH, "//div[contains(@class, \"jobs-easy-apply-modal\")]")))
+
+            # Closing form
+            self.actions.click(
+                form_element.find_element(
+                    By.XPATH, ".//button[@aria-label=\"Dismiss\"]")).perform()
+
+            wait_extra(extra_range_sec=BAIL_OUT_STEP_DELAY)
+
+            # Find save application dialog
+            save_dialog = WebDriverWait(self.driver, EASY_APPLY_POPUP_DETECT_TIMEOUT,
+                                        ignored_exceptions=ignored_exceptions).until(
+                ec.visibility_of_element_located((By.XPATH, "//div[@role=\"alertdialog\"]")))
+
+            # Discard application
+            self.actions.click(
+                save_dialog.find_element(
+                    By.XPATH, ".//button[./span[text()[contains(., \"Discard\")]]]")).perform()
+
+            wait_extra(extra_range_sec=BAIL_OUT_STEP_DELAY)
+        except NoSuchElementException:
+            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
+                                                    job_link=self.current_job.link,
+                                                    reason="Can't close Easy Apply form...")
+            raise EasyApplyException("Can't close Easy Apply form...", exception_data)
 
     def get_easy_apply_form(self) -> WebElement:
         """
@@ -597,25 +651,36 @@ class BrowserClient:
 
         ignored_exceptions = (NoSuchElementException, StaleElementReferenceException)
 
-        # TODO: Do something when element not found
-
-        self.actions.click(
-            self.driver.find_element(
-                By.XPATH,
-                "//button[contains(@class, \"jobs-apply-button\") "
-                "and ./span[contains(., \"Easy Apply\")]]")).perform()
-
-        form_element = WebDriverWait(self.driver, EASY_APPLY_FORM_TIMEOUT, ignored_exceptions=ignored_exceptions).until(
-            ec.visibility_of_element_located((By.XPATH, "//div[contains(@class, \"jobs-easy-apply-modal\")]")))
-
         logger.info("Opening the Easy Apply form")
+
+        try:
+            self.actions.click(
+                self.driver.find_element(
+                    By.XPATH,
+                    "//button[contains(@class, \"jobs-apply-button\") "
+                    "and ./span[contains(., \"Easy Apply\")]]")).perform()
+        except NoSuchElementException:
+            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
+                                                    job_link=self.current_job.link,
+                                                    reason="No Easy Apply button")
+            raise EasyApplyException("Can't find Easy Apply button", exception_data)
+
+        try:
+            form_element = WebDriverWait(self.driver,
+                                         EASY_APPLY_FORM_TIMEOUT,
+                                         ignored_exceptions=ignored_exceptions).until(
+                ec.visibility_of_element_located((By.XPATH, "//div[contains(@class, \"jobs-easy-apply-modal\")]")))
+        except TimeoutException:
+            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
+                                                    job_link=self.current_job.link,
+                                                    reason="No Easy Apply form")
+            raise EasyApplyException("Can't find Easy Apply form", exception_data)
 
         wait_extra(extra_range_sec=EASY_APPLY_FORM_DELAY)
 
         return form_element
 
-    @staticmethod
-    def __get_label_from_field_element(field_element: WebElement) -> str:
+    def __get_label_from_field_element(self, field_element: WebElement) -> str:
         """
         Get label of the field
 
@@ -642,11 +707,14 @@ class BrowserClient:
                 By.XPATH, ".//span[contains(@class, \"fb-dash-form-element__label\")]").text
         except NoSuchElementException:
             # We tried every type yet known, throw exception
-            logger.error("Couldn't find form field label!")
-            raise Exception("Couldn't find form field label!")
+            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
+                                                    job_link=self.current_job.link,
+                                                    reason="Can't find Easy Apply form field's label")
+            raise EasyApplyException("Can't find Easy Apply form field's label", exception_data)
 
-    @staticmethod
-    def __get_data_from_field_element(field_element: WebElement) -> tuple[WebElement, FieldTypeEnum, list[str] | None]:
+    def __get_data_from_field_element(self, field_element: WebElement) -> tuple[WebElement,
+                                                                                FieldTypeEnum,
+                                                                                list[str] | None]:
         """
         Get data about the field:
         actual web element, type from known ones, additional data e.g. options if that's a list
@@ -685,8 +753,42 @@ class BrowserClient:
             return element, field_type, field_data
         except NoSuchElementException:
             # We tried every type yet known, throw exception
-            logger.error("Unknown field type!")
-            raise Exception("Unknown field type!")
+            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
+                                                    job_link=self.current_job.link,
+                                                    reason="Can't find Easy Apply form field")
+            raise EasyApplyException("Can't find Easy Apply form field", exception_data)
+
+    def __get_upload_fields_data(self, form_element: WebElement) -> list[Field]:
+        try:
+            upload_elements = form_element.find_elements(By.XPATH, ".//div[./input[@type=\"file\"]]")
+
+            upload_fields = []
+
+            for element in upload_elements:
+                element_data = Field()
+                element_data.label = element.text
+
+                # Cutting edge of type determining technology!
+                if element_data.label.lower().find("resume") != -1:
+                    element_data.type = FieldTypeEnum.UPLOAD_CV
+                elif element_data.label.lower().find("cover letter") != -1:
+                    element_data.type = FieldTypeEnum.UPLOAD_COVER
+                else:
+                    exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
+                                                            job_link=self.current_job.link,
+                                                            reason="Can't find Easy Apply form upload button")
+                    raise EasyApplyException("Can't find Easy Apply form upload button", exception_data)
+
+                element_data.element = element.find_element(By.XPATH, ".//input[@type=\"file\"]")
+                upload_fields.append(element_data)
+
+            return upload_fields
+
+        except NoSuchElementException:
+            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
+                                                    job_link=self.current_job.link,
+                                                    reason="Can't find Easy Apply form upload button")
+            raise EasyApplyException("Can't find Easy Apply form upload button", exception_data)
 
     def get_form_fields(self, form_element: WebElement) -> Generator[Field | None, None, None]:
         """
@@ -717,16 +819,10 @@ class BrowserClient:
 
             # Assuming we need to upload something
             else:
-                field_data = Field()
-                try:
-                    field_data.element = form_element.find_element(
-                        By.XPATH, "//input[@type=\"file\"]")
-                    field_data.type = FieldTypeEnum.UPLOAD
+                upload_fields = self.__get_upload_fields_data(form_element)
 
-                    yield field_data
-                except NoSuchElementException:
-                    logger.error("Can't find field element on that form!")
-                    raise Exception("Can't find field element on that form!")
+                for upload_field in upload_fields:
+                    yield upload_field
 
             # Seamless form advancing
             form_element = self.__advance_easy_apply_form()
@@ -798,6 +894,15 @@ class BrowserClient:
         wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
 
     def set_suggestions_list(self, suggestions_element: WebElement, value: str) -> None:
+        """
+        Setting text input suggestions list value
+
+        Fire and pray :)
+
+        :param suggestions_element: suggestions list web element
+        :param value: value to set
+        """
+
         target_element = suggestions_element.find_element(By.XPATH,
                                                           f".//div[@role=\"option\" and "
                                                           f".//span[text()[contains(., \"{value}\")]]]")
@@ -806,7 +911,12 @@ class BrowserClient:
         wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
 
     def is_suggestions_list_appeared(self) -> tuple[WebElement | None, list[str] | None]:
-        logger.debug("Checking if suggestions appeared")
+        """
+        Check if suggestions element appeared, usually after input in text field
+
+        :return: None if no suggestions list, otherwise - suggestions element and options
+        """
+
         ignored_exceptions = (NoSuchElementException, StaleElementReferenceException)
 
         try:
