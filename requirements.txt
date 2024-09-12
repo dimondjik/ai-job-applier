@@ -1,4 +1,6 @@
 PyYAML==6.0.2
 selenium-stealth==1.0.6
 selenium==4.24.0
-langchain
+langchain==0.2.16
+langchain-openai==0.1.23
+langchain-community==0.2.16

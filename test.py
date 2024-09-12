@@ -1,6 +1,5 @@
-num_list = {"1": True, "2": False, "3": True}
-num_str = ""
-for k, v in num_list.items():
-    num_str += k if v else ""
+from llm_client import LLMClient
 
-print(num_str)
+if __name__ == "__main__":
+    llm = LLMClient()
+    print(llm.answer_freely("How many years of work experience do you have with C++?"))

@@ -1,5 +1,61 @@
 import time
 import random
+from textwrap import indent
+
+
+# Base class with pretty print function, supports nested classes who also have PrettyPrintable as a base class
+class PrettyPrintable:
+    # Pretty print object fields, YAML-like
+    def __str__(self):
+        pretty = ""
+        # For every property in object
+        for k, v in self.__dict__.items():
+            # If value even contains something
+            if v:
+                # If value is a list
+                if isinstance(v, list):
+                    # If all things in the list are strings or integers
+                    if all([isinstance(i, str) or isinstance(i, int) for i in v]):
+                        # We can absolutely print these values as list
+                        # With key as header
+                        # And items indented by "  - "
+                        pretty += f"{k}:\n"
+                        for v_item in v:
+                            pretty += f"  - {v_item}\n"
+                    # If all thing in the list are classes derived from PrettyPrintable
+                    elif all([isinstance(i, PrettyPrintable) for i in v]):
+                        # We can get pretty print from the class
+                        # With key as header
+                        # Resulting string indented by "    " and fist line by "  - "
+                        pretty += f"{k}:\n"
+                        for v_item in v:
+                            # Splitting by '\n', we should have last empty line, so remove it
+                            for i, v_item_line in enumerate(str(v_item).split('\n')[:-1]):
+                                if i == 0:
+                                    pretty += f"  - {v_item_line}\n"
+                                else:
+                                    pretty += f"    {v_item_line}\n"
+                    # TODO: If value type is not supported do something :)
+                    else:
+                        pass
+                # If value is a string or integer
+                elif isinstance(v, str) or isinstance(v, int):
+                    # We can just simply print in
+                    pretty += f"{k}: {v}\n"
+                # If value is pretty printable class
+                elif isinstance(v, PrettyPrintable):
+                    # Hand over pretty print to that class and indent result by "  "
+                    pretty += f"{k}:\n"
+                    pretty += "{}".format(indent(str(v), "  "))
+                # If value is boolean
+                elif isinstance(v, bool):
+                    # Handle almost the same way as string
+                    pretty += "{}: {}\n".format(k, "true" if v else "false")
+                # TODO: If value type is not supported do something :)
+                else:
+                    pass
+        # By now we should have all things printed here, return it
+        return pretty
 
 
 def wait_for(condition_func, timeout=4, check_delay_sec=0.1):
