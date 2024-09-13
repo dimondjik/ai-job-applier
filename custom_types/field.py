@@ -17,3 +17,5 @@ class FieldTypeEnum(Enum):
     UPLOAD_CV = 3
     UPLOAD_COVER = 4
     RADIO = 5
+    CARDS = 6
+    CHECKBOX = 7

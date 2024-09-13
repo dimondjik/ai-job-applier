@@ -33,9 +33,9 @@ class LLMClient:
         self.llm_chat = ChatOpenAIWrapper()
         self.config = ConfigManager()
         self.keyword = "CANDIDATE_ANSWER: "
-
+    # jobs-easy-apply-repeatable-groupings__groupings
     @staticmethod
-    def __build_prompt(config_manager_prompt, force_single_shot=False) -> ChatPromptTemplate:
+    def __build_prompt(config_manager_prompt, force_single_shot=True) -> ChatPromptTemplate:
         example_prompt = ChatPromptTemplate.from_messages([
             ("user", "{input}"),
             ("ai", "{output}")

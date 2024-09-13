@@ -344,10 +344,13 @@ class BrowserClient:
 
         :param element: desired element
         """
-        logger.debug("Scrolling to an element")
-        self.actions.scroll_to_element(element).perform()
-        # Let the element load
-        wait_extra(extra_range_sec=SCROLL_DELAY)
+        if element.is_displayed():
+            logger.debug("Element already visible")
+        else:
+            logger.debug("Scrolling to an element")
+            self.actions.scroll_to_element(element).perform()
+            # Let the element load
+            wait_extra(extra_range_sec=SCROLL_DELAY)
 
     def __get_jobs_list(self, max_retries: int = 3) -> list[WebElement]:
         """
@@ -557,10 +560,11 @@ class BrowserClient:
             ignored_exceptions = (NoSuchElementException, StaleElementReferenceException)
 
             # Click Review button
-            self.actions.click(
-                self.driver.find_element(
-                    By.XPATH, "//button[contains(@aria-label, \"Review your application\") "
-                              "and ./span[contains(., \"Review\")]]")).perform()
+            next_button = self.driver.find_element(
+                By.XPATH, "//button[contains(@aria-label, \"Review your application\") "
+                          "and ./span[contains(., \"Review\")]]")
+            self.__scroll_to_element(next_button)
+            self.actions.click(next_button).perform()
 
             WebDriverWait(self.driver, EASY_APPLY_FORM_TIMEOUT,
                           ignored_exceptions=ignored_exceptions).until(
@@ -569,17 +573,19 @@ class BrowserClient:
             wait_extra(extra_range_sec=EASY_APPLY_SUBMIT_STEP_DELAY)
 
             # Unfollow company
-            self.actions.click(
-                self.driver.find_element(
-                    By.XPATH, "//input[@id=\"follow-company-checkbox\" and @type=\"checkbox\"]")).perform()
+            next_button = self.driver.find_element(
+                By.XPATH, "//input[@id=\"follow-company-checkbox\" and @type=\"checkbox\"]")
+            self.__scroll_to_element(next_button)
+            self.actions.click(next_button).perform()
 
             wait_extra(extra_range_sec=EASY_APPLY_SUBMIT_STEP_DELAY)
 
             # Submit
-            self.actions.click(
-                self.driver.find_element(
-                    By.XPATH, "//button[contains(@aria-label, \"Submit application\") "
-                              "and ./span[contains(., \"Submit application\")]]")).perform()
+            next_button = self.driver.find_element(
+                By.XPATH, "//button[contains(@aria-label, \"Submit application\") "
+                          "and ./span[contains(., \"Submit application\")]]")
+            self.__scroll_to_element(next_button)
+            self.actions.click(next_button).perform()
 
             # Wait for something to pop up
             wait_extra(extra_range_sec=EASY_APPLY_SUBMIT_FINAL_DELAY)
@@ -687,6 +693,10 @@ class BrowserClient:
         :param field_element: Form field element
         :return: Label string
         """
+        # TODO: List element is a problem, when there's really long labels (happens from time to time, yes)
+        #  Same thing for checkboxes, culprit is two spans with class="visually-hidden" and aria-hidden=true
+        #  Not sure which one to use
+
         # Trying to get label with class usually used for text input
         try:
             return field_element.find_element(
@@ -701,6 +711,21 @@ class BrowserClient:
         except NoSuchElementException:
             pass
 
+        # Why? Just WHY?
+        # Trying to get label, which is actually a title outside form element group
+        try:
+            return field_element.find_element(
+                By.XPATH, "../../span[contains(@class, \"jobs-easy-apply-form-section__group-title\")]").text
+        except NoSuchElementException:
+            pass
+
+        # Trying to get label with class usually used for checkboxes
+        try:
+            return field_element.find_element(
+                By.XPATH, ".//div[contains(@class, \"fb-dash-form-element__label\")]").text
+        except NoSuchElementException:
+            pass
+
         # Trying to get label with class usually used for radio buttons input
         try:
             return field_element.find_element(
@@ -711,6 +736,11 @@ class BrowserClient:
                                                     job_link=self.current_job.link,
                                                     reason="Can't find Easy Apply form field's label")
             raise EasyApplyException("Can't find Easy Apply form field's label", exception_data)
+
+            # Wait I have another idea
+            # # Now I don't think label exception rise is alright, because we have CARDS now! My god...
+            # # We tried every type yet known, return nothing
+            # return ""
 
     def __get_data_from_field_element(self, field_element: WebElement) -> tuple[WebElement,
                                                                                 FieldTypeEnum,
@@ -744,11 +774,33 @@ class BrowserClient:
             pass
 
         try:
+            # Is this a textarea input field? Trying to find text input
+            element = field_element.find_element(By.XPATH, ".//textarea")
+            field_type = FieldTypeEnum.INPUT
+            field_data = None
+
+            return element, field_type, field_data
+        except NoSuchElementException:
+            pass
+
+        try:
+            # Is this a checkbox? Trying to find checkbox
+            checkbox = field_element.find_element(By.XPATH, ".//input[@type=\"checkbox\"]")
+            element = field_element
+            field_type = FieldTypeEnum.CHECKBOX
+            # Hack to make checkbox an options containing element :)
+            field_data = [checkbox.find_element(By.XPATH, "../label").text]
+
+            return element, field_type, field_data
+        except NoSuchElementException:
+            pass
+
+        try:
             # Is this a radio button? Trying to find radio field
+            radio = field_element.find_elements(By.XPATH, ".//input[@type=\"radio\"]")
             element = field_element
             field_type = FieldTypeEnum.RADIO
-            field_data = [o.get_attribute("value") for o in
-                          field_element.find_elements(By.XPATH, ".//input[@type=\"radio\"]")]
+            field_data = [r.find_element(By.XPATH, "../label").text for r in radio]
 
             return element, field_type, field_data
         except NoSuchElementException:
@@ -774,10 +826,8 @@ class BrowserClient:
                 elif element_data.label.lower().find("cover letter") != -1:
                     element_data.type = FieldTypeEnum.UPLOAD_COVER
                 else:
-                    exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
-                                                            job_link=self.current_job.link,
-                                                            reason="Can't find Easy Apply form upload button")
-                    raise EasyApplyException("Can't find Easy Apply form upload button", exception_data)
+                    # TODO: Is it always safe to skip?
+                    continue
 
                 element_data.element = element.find_element(By.XPATH, ".//input[@type=\"file\"]")
                 upload_fields.append(element_data)
@@ -785,10 +835,7 @@ class BrowserClient:
             return upload_fields
 
         except NoSuchElementException:
-            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
-                                                    job_link=self.current_job.link,
-                                                    reason="Can't find Easy Apply form upload button")
-            raise EasyApplyException("Can't find Easy Apply form upload button", exception_data)
+            return []
 
     def get_form_fields(self, form_element: WebElement) -> Generator[Field | None, None, None]:
         """
@@ -798,11 +845,14 @@ class BrowserClient:
         :return: Form Field object
         """
 
+        # TODO: Interesting consequence of this approach is that
+        #  it will skip page comprised of unknown fields possibly breaking everything, rethink that
         while True:
             # Find form elements
             easy_apply_form_fields = form_element.find_elements(
                 By.XPATH, "//div[contains(@class, \"jobs-easy-apply-form-element\")]")
 
+            # If found any input fields
             if easy_apply_form_fields:
                 for form_field in easy_apply_form_fields:
                     field_data = Field()
@@ -818,11 +868,28 @@ class BrowserClient:
                     yield field_data
 
             # Assuming we need to upload something
-            else:
-                upload_fields = self.__get_upload_fields_data(form_element)
+            # Not through "else" with operator above, because there's pages with upload AND some input fields
+            # TODO: Inconsistency with approach above where data returned separately and then packed into object?
+            #  A) Leave as it is to not make nested generator
+            #  B) Remake above approach to return object (preferred)
+            upload_fields = self.__get_upload_fields_data(form_element)
 
+            # If found upload fields
+            if upload_fields:
                 for upload_field in upload_fields:
                     yield upload_field
+
+            # If not assuming that's cards page, as far as I know it has unique container
+            else:
+                try:
+                    form_element.find_element(
+                        By.XPATH, ".//form["
+                                  "./div[contains(@class, \"jobs-easy-apply-repeatable-groupings__groupings\")]]")
+                    field_data = Field()
+                    field_data.type = FieldTypeEnum.CARDS
+                    yield field_data
+                except NoSuchElementException:
+                    pass
 
             # Seamless form advancing
             form_element = self.__advance_easy_apply_form()
@@ -891,6 +958,23 @@ class BrowserClient:
         #  input field is underneath label on LinkedIn
         # radio_field.find_element(By.XPATH, f".//input[@type=\"radio\" and @value=\"{value}\"]").click()
         radio_field.find_element(By.XPATH, f".//label[text()[contains(., \"{value}\")]]").click()
+        wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
+
+    @staticmethod
+    def set_checkbox_field(checkbox_field: WebElement, value: str) -> None:
+        """
+        Click element from WebElement, assuming that is checkbox container, with corresponding value
+
+        Fire and pray :)
+
+        :param checkbox_field: Radio buttons field container element
+        :param value: Visible text on radio button to select
+        """
+
+        # TODO: Selenium doesnt want to click on input element, try with Actions.click.perform instead?
+        #  input field is underneath label on LinkedIn
+        # radio_field.find_element(By.XPATH, f".//input[@type=\"radio\" and @value=\"{value}\"]").click()
+        checkbox_field.find_element(By.XPATH, f".//label[text()[contains(., \"{value}\")]]").click()
         wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
 
     def set_suggestions_list(self, suggestions_element: WebElement, value: str) -> None:
