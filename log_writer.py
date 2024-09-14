@@ -7,6 +7,10 @@ from utils import Singleton
 
 class LogWriter(metaclass=Singleton):
     def __init__(self):
+        """
+        Class for writing job application result log in logs folder
+        """
+
         current_time_postfix = datetime.now().strftime("-%Y_%m_%d-%H_%M_%S")
         self.success_path = os.path.join(".",
                                          "logs",
@@ -19,6 +23,11 @@ class LogWriter(metaclass=Singleton):
         open(self.failed_path, "w").close()
 
     def log_success(self, job_data: Job) -> None:
+        """
+        Write successful job application to log
+
+        :param job_data: Job object
+        """
         with open(self.success_path, "a") as f:
             f.writelines("{} ({})\n"
                          "{}\n"
@@ -28,6 +37,11 @@ class LogWriter(metaclass=Singleton):
                                                          job_data.link))
 
     def log_error(self, ex_data: EasyApplyExceptionData) -> None:
+        """
+        Write failed job application to log
+
+        :param ex_data: Custom exception object
+        """
         with open(self.failed_path, "a") as f:
             f.writelines("{}\n"
                          "Link: {}\n"

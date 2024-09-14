@@ -6,7 +6,7 @@ from llm_client import LLMClient
 from utils import wait_extra
 from log_writer import LogWriter
 
-from custom_types.field import FieldTypeEnum
+from custom_types import *
 
 from custom_exceptions import EasyApplyException, EasyApplyExceptionData
 
@@ -23,9 +23,15 @@ class LinkedInClient:
 
         self.browser_client = BrowserClient()
         self.config = ConfigManager()
+        print(self.config.blacklist.title_keywords)
+        print(self.config.blacklist.company)
+        print(self.config.blacklist.blacklist_mode)
         self.llm_client = LLMClient()
         self.custom_logger = LogWriter()
 
+    # TODO: Add resume mode filter
+    #  Add title filter
+    #  Add company filter
     def __try_no_llm_answer(self, field_type, field_label, field_options) -> str:
         answer = ""
         if field_type == FieldTypeEnum.INPUT:
@@ -124,7 +130,7 @@ class LinkedInClient:
                 else:
                     res, answer = self.llm_client.answer_with_options(form_field.label, form_field.data)
                     if res:
-                        BrowserClient.set_checkbox_field(form_field.element, answer)
+                        BrowserClient.set_checkbox_field(form_field.element)
                     else:
                         return False
 
@@ -149,7 +155,7 @@ class LinkedInClient:
                         if job is None:
                             break
                         if job.applied:
-                            logger.info("Skipping, already applied")
+                            logger.info("Already applied, skipping")
                             continue
 
                         self.browser_client.get_job_description_and_hiring_team(job)
