@@ -19,8 +19,8 @@ class LogWriter(metaclass=Singleton):
                                         "logs",
                                         f"failed{current_time_postfix}.txt")
 
-        open(self.success_path, "w").close()
-        open(self.failed_path, "w").close()
+        open(self.success_path, "w", encoding="UTF-8").close()
+        open(self.failed_path, "w", encoding="UTF-8").close()
 
     def log_success(self, job_data: Job) -> None:
         """
@@ -28,7 +28,7 @@ class LogWriter(metaclass=Singleton):
 
         :param job_data: Job object
         """
-        with open(self.success_path, "a") as f:
+        with open(self.success_path, "a", encoding="UTF-8") as f:
             f.writelines("{} ({})\n"
                          "{}\n"
                          "Link: {}\n"
@@ -42,7 +42,7 @@ class LogWriter(metaclass=Singleton):
 
         :param ex_data: Custom exception object
         """
-        with open(self.failed_path, "a") as f:
+        with open(self.failed_path, "a", encoding="UTF-8") as f:
             f.writelines("{}\n"
                          "Link: {}\n"
                          "Reason: {}\n"

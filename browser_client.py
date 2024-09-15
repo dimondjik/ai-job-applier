@@ -75,6 +75,8 @@ EASY_APPLY_POPUP_DETECT_TIMEOUT = 6
 
 BAIL_OUT_STEP_DELAY = (2., 4.)
 
+JOBS_PER_PAGE = 25
+
 
 class BrowserClient:
     def __init__(self):
@@ -414,26 +416,44 @@ class BrowserClient:
         logger.warning(f"Job list lengths comparing retries exceeded max_retries ({max_retries})!")
         return []
 
-    def get_jobs_from_search_url(self, url: str) -> Generator[Job | None, None, None]:
-        """
-        Get data from jobs list on the search url
-
-        :param url: Search url, should contain element with class "jobs-search-results-list"
-
-        :return: Job object with info from the page
-        """
-        # Go to search page with provided link
-        self.driver.get(url)
-        logger.info(f"Searching {url}")
-
+    def __page_has_jobs(self) -> bool:
         try:
             # Try to find no jobs banner, if not found and exception thrown - that's great,
             # means that something is found
             self.driver.find_element(By.CLASS_NAME, "jobs-search-no-results-banner")
             logger.info("No jobs found")
-            yield None
+            return False
         except NoSuchElementException:
-            pass
+            return True
+
+    def get_page_jobs(self, url: str, page: int) -> Generator[Job | None, None, None] | None:
+        """
+
+        :param url: Search url, should contain element with class "jobs-search-results-list"
+        :param page:
+        :return:
+        """
+
+        if page != 0:
+            url_with_page = "{}&start={}".format(url, page * JOBS_PER_PAGE)
+        else:
+            url_with_page = url
+
+        self.driver.get(url_with_page)
+
+        if not self.__page_has_jobs():
+            return None
+
+        logger.info(f"Searching {url}")
+
+        return self.__get_jobs_from_search_url()
+
+    def __get_jobs_from_search_url(self) -> Generator[Job | None, None, None]:
+        """
+        Get data from jobs list on the search url
+
+        :return: Job object with info from the page
+        """
 
         jobs_count = len(self.__get_jobs_list())
 
@@ -909,11 +929,10 @@ class BrowserClient:
                     pass
 
             # Seamless form advancing
+            # TODO: Check for form errors somewhere, that red text that pops up when field filled incorrectly
             form_element = self.__advance_easy_apply_form()
 
             # If we can't advance further, it should be stopped here on the caller's side
-            # TODO: Uh-uh, the bot can infinitely press "Next" button when there's no field found,
-            #  when actually they exist, check for errors in somewhere
             if form_element is None:
                 yield None
 
@@ -994,7 +1013,6 @@ class BrowserClient:
         checkbox_field.click()
         wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
 
-    # TODO: Check whole suggestions thing
     def set_suggestions_list(self, suggestions_element: WebElement, value: str) -> None:
         """
         Setting text input suggestions list value

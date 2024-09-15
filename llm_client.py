@@ -32,7 +32,6 @@ class LLMClient:
     def __init__(self):
         self.llm_chat = ChatOpenAIWrapper()
         self.config = ConfigManager()
-        # self.keyword = "CANDIDATE_ANSWER:"
         self.no_answer_keyword = "CANDIDATE_NO_DATA"
         self.key_tag = "ANSWER"
 
@@ -92,17 +91,6 @@ class LLMClient:
                 raise
 
         return prompt
-
-    # def __keyword_parser(self, message: AIMessage) -> str:
-    #     message_string = message.content
-    #
-    #     logger.debug(f"Full LLM answer: \n {message_string}")
-    #
-    #     keyword_index = message_string.rfind(self.keyword)
-    #     if keyword_index == -1:
-    #         return ""
-    #     else:
-    #         return message_string[keyword_index + len(self.keyword):]
 
     def __tag_parser(self, message: AIMessage) -> str:
         """
@@ -164,13 +152,14 @@ class LLMClient:
             answer = chain.invoke({"resume": str(self.config.user_info),
                                    "question": question})
 
-            logger.warning(f"OpenAI call cost:\n {cb.total_cost}")
+            logger.warning(f"OpenAI call cost: {cb.total_cost}")
 
         if answer:
-            logger.info(f"LLM answer:\n {answer}")
+            logger.info(f"The question: {question}\n"
+                        f"LLM answer: {answer}")
             return True, answer
         else:
-            logger.info("LLM did not produce answer!")
+            logger.info("LLM did not produce an answer!")
             return False, answer
 
     def answer_with_options(self, question: str, options: list[str]) -> tuple[bool, str]:
@@ -198,11 +187,12 @@ class LLMClient:
                                    "question": question,
                                    "options": str(options)})
 
-            logger.warning(f"OpenAI call cost:\n {cb.total_cost}")
+            logger.warning(f"OpenAI call cost: {cb.total_cost}")
 
         if answer:
-            logger.info(f"LLM answer:\n {answer}")
+            logger.info(f"The question: {question}\n "
+                        f"LLM answer: {answer}")
             return True, answer
         else:
-            logger.info("LLM did not produce answer!")
+            logger.info("LLM did not produce an answer!")
             return False, answer

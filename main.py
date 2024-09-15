@@ -8,16 +8,15 @@ for name, logger in logging.root.manager.loggerDict.items():
     if name not in ["LinkedInClient", "LLMClient", "BrowserClient"]:
         logger.disabled = True
 
-# TODO: This job breaks everything, but on the good side it has almost every element LinkedIn Easy Apply can contain
-#  https://www.linkedin.com/jobs/view/4020330291
-#  GOLIATH HAS FALLEN
-
 # TODO: Add Canada work eligibility = false, true whatever
 #  Add postal code = something, numbers
 #  Add cover letter...
-#  Add auto agree on terms and conditions = true, because the LLM rightfully doesn't know what to answer
 
-# TODO: Rethink how error message is constructed
+# TODO: Job object is duplicated in linkedin and browser clients!
+#  Do something with it...
+
+# TODO: Exceptions are wildly inconsistent, some are critical, others can be skipped
+#  Think about better structure
 
 if __name__ == '__main__':
     bot = LinkedInClient()

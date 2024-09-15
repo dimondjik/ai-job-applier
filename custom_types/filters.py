@@ -10,6 +10,7 @@ class Filters:
     job_type: list[str] = None
     location: list[str] = None
     title: list[str] = None
+    local_resume_trigger: list["LocalResumeTrigger"] = None
 
     @staticmethod
     def from_filters_yaml(filters_yaml):
@@ -24,4 +25,12 @@ class Filters:
         filters.location = filters_yaml["location"]
         filters.title = filters_yaml["title"]
 
+        filters.local_resume_trigger = [LocalResumeTrigger(**t) for t in filters_yaml["local_resume_trigger"]]
+
         return filters
+
+
+@dataclass
+class LocalResumeTrigger:
+    key_phrase: str = ""
+    path: str = ""
