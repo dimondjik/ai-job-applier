@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from custom_types.job import Job
-from custom_exceptions import EasyApplyExceptionData
+from custom_exceptions import CustomExceptionData
 from utils import Singleton
 
 
@@ -36,16 +36,11 @@ class LogWriter(metaclass=Singleton):
                                                          job_data.location,
                                                          job_data.link))
 
-    def log_error(self, ex_data: EasyApplyExceptionData) -> None:
+    def log_error(self, ex_data: CustomExceptionData) -> None:
         """
         Write failed job application to log
 
         :param ex_data: Custom exception object
         """
         with open(self.failed_path, "a", encoding="UTF-8") as f:
-            f.writelines("{}\n"
-                         "Link: {}\n"
-                         "Reason: {}\n"
-                         "--------------------\n".format(ex_data.job_title,
-                                                         ex_data.job_link,
-                                                         ex_data.reason))
+            f.writelines(f"{ex_data}\n" + 120 * "-" + "\n")

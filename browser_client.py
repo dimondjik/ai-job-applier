@@ -17,10 +17,8 @@ from typing import Generator
 from custom_types import *
 import random
 
-from custom_exceptions import (LoginFailException,
-                               JobListException,
-                               EasyApplyException,
-                               EasyApplyExceptionData)
+from custom_exceptions import (BrowserClientException,
+                               CustomExceptionData)
 
 logger = logging.getLogger("BrowserClient")
 
@@ -133,7 +131,7 @@ class BrowserClient:
         self.__logged_in = False
 
         # Mainly for logging purposes
-        self.current_job = None
+        self.exception_data = CustomExceptionData()
 
         logger.info("Chrome driver created")
 
@@ -296,8 +294,9 @@ class BrowserClient:
         try:
             sign_in_button = self.driver.find_element(By.XPATH, "//button[@aria-label=\"Sign in\"]")
         except NoSuchElementException:
-            raise LoginFailException(
-                "Login function called on non-login page ({})".format(self.driver.current_url))
+            self.exception_data.page_url = self.driver.current_url
+            self.exception_data.reason = "Login function called on non-login page"
+            raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
         try:
             email_field = self.driver.find_element(By.XPATH, "//input[@id=\"username\"]")
@@ -311,8 +310,9 @@ class BrowserClient:
             password_field.send_keys(self.config.linkedin_pass)
             wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
         except NoSuchElementException:
-            raise LoginFailException(
-                "Can't find \"Password\" field ({})".format(self.driver.current_url))
+            self.exception_data.page_url = self.driver.current_url
+            self.exception_data.reason = "Can't find \"Password\" field on login page"
+            raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
         sign_in_button.click()
         wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
@@ -381,9 +381,8 @@ class BrowserClient:
                                                        "/li[contains(@class, "
                                                        "\"jobs-search-results__list-item\")]"))))
         except TimeoutException:
-            raise JobListException(
-                "Job search result list element not found ({})"
-                .format(self.driver.current_url))
+            self.exception_data.reason = "Job search result list element not found"
+            raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
         retries = 0
 
@@ -402,9 +401,8 @@ class BrowserClient:
                                                            "/li[contains(@class, "
                                                            "\"jobs-search-results__list-item\")]")))
             except TimeoutException:
-                raise JobListException(
-                    "Job search result list element not found ({})"
-                    .format(self.driver.current_url))
+                self.exception_data.reason = "Job search result list element not found"
+                raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
             if len(jobs_list) == prev_jobs_count:
                 return jobs_list
@@ -440,6 +438,7 @@ class BrowserClient:
             url_with_page = url
 
         self.driver.get(url_with_page)
+        self.exception_data.page_url = self.driver.current_url
 
         if not self.__page_has_jobs():
             return None
@@ -506,12 +505,14 @@ class BrowserClient:
                     job_data.applied = False
 
             except NoSuchElementException:
-                raise JobListException("Cannot get job info ({})".format(self.driver.current_url))
+                self.exception_data.reason = "Cannot get job info"
+                raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
             logger.info(f"Found job item: {job_data.title} ({job_data.company})")
 
             # Mainly for logging purposes
-            self.current_job = job_data
+            self.exception_data.job_title = job_data.title
+            self.exception_data.job_link = job_data.link
 
             yield job_data
 
@@ -536,7 +537,8 @@ class BrowserClient:
             job_data.desc = self.driver.find_element(
                 By.XPATH, "//article[contains(@class, \"jobs-description__container\")]").text
         except NoSuchElementException:
-            raise JobListException("Can't find job description ({})".format(self.current_job.link))
+            self.exception_data.reason = "Can't find job description"
+            raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
         try:
             job_data.hr = self.driver.find_element(
@@ -545,9 +547,6 @@ class BrowserClient:
         except NoSuchElementException:
             logger.debug("Can't find HR link, that's not essential")
             pass
-
-        # Mainly for logging purposes
-        self.current_job = job_data
 
     def __advance_easy_apply_form(self) -> WebElement | None:
         """
@@ -582,7 +581,7 @@ class BrowserClient:
         """
         # New error message every step,
         # when next instructions will fail, this would be last detailed error message
-        error_message = "Finalize Easy apply failed: Unknown error!"
+        self.exception_data.reason = "Finalize Easy apply failed: Unknown error!"
 
         logger.info("Finalizing application")
 
@@ -590,14 +589,14 @@ class BrowserClient:
             ignored_exceptions = (NoSuchElementException, StaleElementReferenceException)
 
             # Click Review button
-            error_message = "Finalize Easy apply failed: No Review button found!"
+            self.exception_data.reason = "Finalize Easy apply failed: No Review button found!"
             next_button = self.driver.find_element(
                 By.XPATH, "//button[contains(@aria-label, \"Review your application\") "
                           "and ./span[contains(., \"Review\")]]")
             self.__scroll_to_element(next_button)
             self.actions.click(next_button).perform()
 
-            error_message = "Finalize Easy apply failed: No form element found!"
+            self.exception_data.reason = "Finalize Easy apply failed: No form element found!"
             WebDriverWait(self.driver, EASY_APPLY_FORM_TIMEOUT,
                           ignored_exceptions=ignored_exceptions).until(
                 ec.visibility_of_element_located((By.XPATH, "//div[contains(@class, \"jobs-easy-apply-modal\")]")))
@@ -617,7 +616,7 @@ class BrowserClient:
             wait_extra(extra_range_sec=EASY_APPLY_SUBMIT_STEP_DELAY)
 
             # Submit
-            error_message = "Finalize Easy apply failed: No Submit application button found!"
+            self.exception_data.reason = "Finalize Easy apply failed: No Submit application button found!"
             next_button = self.driver.find_element(
                 By.XPATH, "//button[contains(@aria-label, \"Submit application\") "
                           "and ./span[contains(., \"Submit application\")]]")
@@ -628,32 +627,29 @@ class BrowserClient:
             wait_extra(extra_range_sec=EASY_APPLY_SUBMIT_FINAL_DELAY)
 
             # Wait for something to pop up of a dialog class
-            error_message = "Finalize Easy apply failed: No Popup alert found!"
+            self.exception_data.reason = "Finalize Easy apply failed: No Popup alert found!"
             any_dialog = WebDriverWait(self.driver, EASY_APPLY_POPUP_DETECT_TIMEOUT,
                                        ignored_exceptions=ignored_exceptions).until(
                 ec.visibility_of_element_located((By.XPATH, "//div[@role=\"dialog\"]")))
 
             # Closing popup dialog
-            error_message = "Finalize Easy apply failed: Can't find popup close button!"
+            self.exception_data.reason = "Finalize Easy apply failed: Can't find popup close button!"
             self.actions.click(
                 any_dialog.find_element(
                     By.XPATH, ".//button[@aria-label=\"Dismiss\"]")).perform()
             logger.info("Successfully closed popup")
 
-            logger.info(f"Successful {self.current_job.title} application at {self.current_job.company}!")
+            logger.info(f"Successful {self.exception_data.job_title} application!")
 
             wait_extra(extra_range_sec=EASY_APPLY_SUBMIT_STEP_DELAY)
 
         except (NoSuchElementException, TimeoutException):
-            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
-                                                    job_link=self.current_job.link,
-                                                    reason=error_message)
-            raise EasyApplyException(exception_data.reason, exception_data)
+            raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
-    def bail_out(self):
+    def bail_out(self) -> None:
         # New error message every step,
         # when next instructions will fail, this would be last detailed error message
-        error_message = "Bail out failed: Unknown error!"
+        self.exception_data.reason = "Bail out failed: Unknown error!"
 
         logger.info("Bailing out")
 
@@ -661,13 +657,13 @@ class BrowserClient:
             ignored_exceptions = (NoSuchElementException, StaleElementReferenceException)
 
             # Find form element
-            error_message = "Bail out failed: No form element found!"
+            self.exception_data.reason = "Bail out failed: No form element found!"
             form_element = WebDriverWait(self.driver, EASY_APPLY_FORM_TIMEOUT,
                                          ignored_exceptions=ignored_exceptions).until(
                 ec.visibility_of_element_located((By.XPATH, "//div[contains(@class, \"jobs-easy-apply-modal\")]")))
 
             # Closing form
-            error_message = "Bail out failed: No form close button found!"
+            self.exception_data.reason = "Bail out failed: No form close button found!"
             self.actions.click(
                 form_element.find_element(
                     By.XPATH, ".//button[@aria-label=\"Dismiss\"]")).perform()
@@ -675,23 +671,21 @@ class BrowserClient:
             wait_extra(extra_range_sec=BAIL_OUT_STEP_DELAY)
 
             # Find save application dialog
-            error_message = "Bail out failed: No Save dialog alert found!"
+            self.exception_data.reason = "Bail out failed: No Save dialog alert found!"
             save_dialog = WebDriverWait(self.driver, EASY_APPLY_POPUP_DETECT_TIMEOUT,
                                         ignored_exceptions=ignored_exceptions).until(
                 ec.visibility_of_element_located((By.XPATH, "//div[@role=\"alertdialog\"]")))
 
             # Discard application
-            error_message = "Bail out failed: No Discard button found in Save alert dialog!"
+            self.exception_data.reason = "Bail out failed: No Discard button found in Save alert dialog!"
             self.actions.click(
                 save_dialog.find_element(
                     By.XPATH, ".//button[./span[text()[contains(., \"Discard\")]]]")).perform()
 
             wait_extra(extra_range_sec=BAIL_OUT_STEP_DELAY)
+
         except (NoSuchElementException, TimeoutException):
-            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
-                                                    job_link=self.current_job.link,
-                                                    reason=error_message)
-            raise EasyApplyException(exception_data.reason, exception_data)
+            raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
     def get_easy_apply_form(self) -> WebElement:
         """
@@ -711,10 +705,8 @@ class BrowserClient:
                     "//button[contains(@class, \"jobs-apply-button\") "
                     "and ./span[contains(., \"Easy Apply\")]]")).perform()
         except NoSuchElementException:
-            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
-                                                    job_link=self.current_job.link,
-                                                    reason="No Easy Apply button")
-            raise EasyApplyException("Can't find Easy Apply button", exception_data)
+            self.exception_data.reason = "No Easy Apply button found"
+            raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
         try:
             form_element = WebDriverWait(self.driver,
@@ -722,10 +714,8 @@ class BrowserClient:
                                          ignored_exceptions=ignored_exceptions).until(
                 ec.visibility_of_element_located((By.XPATH, "//div[contains(@class, \"jobs-easy-apply-modal\")]")))
         except TimeoutException:
-            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
-                                                    job_link=self.current_job.link,
-                                                    reason="No Easy Apply form")
-            raise EasyApplyException("Can't find Easy Apply form", exception_data)
+            self.exception_data.reason = "No Easy Apply form appeared"
+            raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
         wait_extra(extra_range_sec=EASY_APPLY_FORM_DELAY)
 
@@ -773,10 +763,8 @@ class BrowserClient:
             return field_label
         else:
             # We tried every type yet known, throw exception
-            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
-                                                    job_link=self.current_job.link,
-                                                    reason="Can't find Easy Apply form field's label")
-            raise EasyApplyException(exception_data.reason, exception_data)
+            self.exception_data.reason = "Can't find Easy Apply form field's label"
+            raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
     def __get_data_from_field_element(self, field_element: WebElement) -> tuple[FieldTypeEnum,
                                                                                 WebElement,
@@ -833,10 +821,8 @@ class BrowserClient:
             return form_field_type, form_field_element, form_field_data
         else:
             # We tried every type yet known, throw exception
-            exception_data = EasyApplyExceptionData(job_title=self.current_job.title,
-                                                    job_link=self.current_job.link,
-                                                    reason="Can't find Easy Apply form's field data")
-            raise EasyApplyException(exception_data.reason, exception_data)
+            self.exception_data.reason = "Can't find Easy Apply form's field data"
+            raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
     @staticmethod
     def __get_upload_fields_data(form_element: WebElement) -> list[Field]:

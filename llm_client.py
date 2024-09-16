@@ -5,6 +5,7 @@ from config_manager import ConfigManager, FewShotPrompt
 from langchain_core.messages import AIMessage
 import logging
 from html.parser import HTMLParser
+from custom_exceptions import LLMException, CustomExceptionData
 
 logger = logging.getLogger("LLMClient")
 
@@ -34,6 +35,8 @@ class LLMClient:
         self.config = ConfigManager()
         self.no_answer_keyword = "CANDIDATE_NO_DATA"
         self.key_tag = "ANSWER"
+
+        self.exception_data = CustomExceptionData()
 
     @staticmethod
     def __build_prompt(config_manager_prompt: FewShotPrompt, prompt_example_mode: int = 0) -> ChatPromptTemplate:
@@ -124,13 +127,15 @@ class LLMClient:
         parser.feed(message_string)
 
         if self.no_answer_keyword in parser.answer:
-            return ""
+            self.exception_data.reason = "LLM did not produce an answer!"
+            self.exception_data.llm_answer = message_string
+            raise LLMException(self.exception_data.reason, self.exception_data)
         else:
             # TODO: Return with quick cleanup, expand if needed
             return parser.answer.replace("\n", "").strip()
 
     # TODO: These two functions differ just by options field, can I combine it to one?
-    def answer_freely(self, question: str) -> tuple[bool, str]:
+    def answer_freely(self, question: str) -> str:
         """
         Answer on question in free format
 
@@ -154,15 +159,12 @@ class LLMClient:
 
             logger.warning(f"OpenAI call cost: {cb.total_cost}")
 
-        if answer:
-            logger.info(f"The question: {question}\n"
-                        f"LLM answer: {answer}")
-            return True, answer
-        else:
-            logger.info("LLM did not produce an answer!")
-            return False, answer
+        logger.info(f"The question: {question}\n"
+                    f"LLM answer: {answer}")
 
-    def answer_with_options(self, question: str, options: list[str]) -> tuple[bool, str]:
+        return answer
+
+    def answer_with_options(self, question: str, options: list[str]) -> str:
         """
         Answer on question from options provided
 
@@ -189,10 +191,7 @@ class LLMClient:
 
             logger.warning(f"OpenAI call cost: {cb.total_cost}")
 
-        if answer:
-            logger.info(f"The question: {question}\n "
-                        f"LLM answer: {answer}")
-            return True, answer
-        else:
-            logger.info("LLM did not produce an answer!")
-            return False, answer
+        logger.info(f"The question: {question}\n "
+                    f"LLM answer: {answer}")
+
+        return answer

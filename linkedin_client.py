@@ -8,7 +8,7 @@ from log_writer import LogWriter
 
 from custom_types import *
 
-from custom_exceptions import EasyApplyException, EasyApplyExceptionData
+from custom_exceptions import BrowserClientException, CustomExceptionData, BotClientException, LLMException
 
 logger = logging.getLogger("LinkedInClient")
 
@@ -30,11 +30,7 @@ class LinkedInClient:
         self.llm_client = LLMClient()
         self.custom_logger = LogWriter()
 
-        # For logging purposes
-        self.error_message = ""
-
-        # Uh, I can't think of something better
-        self.current_job: Job = Job()
+        self.exception_data = CustomExceptionData()
 
         self.current_page = 0
 
@@ -77,7 +73,7 @@ class LinkedInClient:
 
         return answer
 
-    def __is_title_or_company_blacklisted(self) -> bool:
+    def __is_title_or_company_blacklisted(self, job_object) -> bool:
         """
         Blacklist function which is partially implemented :)
 
@@ -87,14 +83,14 @@ class LinkedInClient:
         # TODO: Make this match-case?
         if self.config.blacklist.blacklist_mode == BlacklistEnum.WHOLE_WORDS:
 
-            split_title = self.current_job.title.lower().strip().split(" ")
+            split_title = job_object.title.lower().strip().split(" ")
             for a in split_title:
                 for b in self.config.blacklist.title_keywords:
                     if a == b:
                         logger.info(f"Job blacklisted by keyword \"{a}\"")
                         return True
 
-            company = self.current_job.company.lower().strip()
+            company = job_object.company.lower().strip()
             for b in self.config.blacklist.company:
                 if company == b:
                     logger.info(f"Job blacklisted by company \"{company}\"")
@@ -114,14 +110,14 @@ class LinkedInClient:
             logger.error("Unknown blacklist mode!")
             return False
 
-    def __get_local_resume_path_by_title(self) -> str:
+    def __get_local_resume_path_by_title(self, job_object) -> str:
         """
         Processes title and if key phrase found - return path to local resume
         :return: absolute path to local resume
         """
         for trigger in self.config.filters.local_resume_trigger:
             split_key_phrase = trigger.key_phrase.lower().strip().split(" ")
-            if all(kw in self.current_job.title.lower() for kw in split_key_phrase):
+            if all(kw in job_object.title.lower() for kw in split_key_phrase):
                 logger.info(f"Local resume triggered by key phrase {trigger.key_phrase}")
                 return trigger.path
 
@@ -133,7 +129,7 @@ class LinkedInClient:
     #     form_element = self.browser_client.get_easy_apply_form()
     #     self.__apply_to_job(form_element)
 
-    def __apply_to_job(self, easy_apply_form):
+    def __apply_to_job(self, easy_apply_form, job_object):
         for form_field in self.browser_client.get_form_fields(easy_apply_form):
             if form_field is None:
                 break
@@ -146,22 +142,13 @@ class LinkedInClient:
                         logger.info("Saved a cent!\n"
                                     f"The question: {form_field.label}\n"
                                     f"Local answer: {answer}")
-
                     else:
-                        res, answer = self.llm_client.answer_with_options(form_field.label, form_field.data)
-                        if not res:
-                            self.error_message = (f"LLM did not produce answer.\n"
-                                                  f"Question was: {form_field.label}")
-                            return False
+                        answer = self.llm_client.answer_with_options(form_field.label, form_field.data)
 
                     BrowserClient.set_dropdown_field(form_field.element, answer)
 
                 case FieldTypeEnum.RADIO:
-                    res, answer = self.llm_client.answer_with_options(form_field.label, form_field.data)
-                    if not res:
-                        self.error_message = (f"LLM did not produce answer.\n"
-                                              f"Question was: {form_field.label}")
-                        return False
+                    answer = self.llm_client.answer_with_options(form_field.label, form_field.data)
 
                     BrowserClient.set_radio_field(form_field.element, answer)
 
@@ -171,13 +158,8 @@ class LinkedInClient:
                         logger.info("Saved a cent!\n"
                                     f"The question: {form_field.label}\n"
                                     f"Local answer: {answer}")
-
                     else:
-                        res, answer = self.llm_client.answer_freely(form_field.label)
-                        if not res:
-                            self.error_message = (f"LLM did not produce answer.\n"
-                                                  f"Question was: {form_field.label}")
-                            return False
+                        answer = self.llm_client.answer_freely(form_field.label)
 
                     BrowserClient.set_input_field(form_field.element, answer)
 
@@ -186,56 +168,49 @@ class LinkedInClient:
                      suggestions_options) = self.browser_client.is_suggestions_list_appeared()
 
                     if suggestions_element is not None:
-                        res, answer = self.llm_client.answer_with_options(form_field.label, suggestions_options)
-                        if not res:
-                            self.error_message = (f"LLM did not produce answer.\n"
-                                                  f"Question was: {form_field.label}")
-                            return False
+                        answer = self.llm_client.answer_with_options(form_field.label, suggestions_options)
 
                         self.browser_client.set_suggestions_list(suggestions_element, answer)
 
                 case FieldTypeEnum.UPLOAD_CV:
-                    resume_path = self.__get_local_resume_path_by_title()
+                    resume_path = self.__get_local_resume_path_by_title(job_object)
                     if not resume_path:
                         # TODO: Generate resume with AI here
-                        self.error_message = "Resume generation not implemented yet!"
-                        return False
+                        self.exception_data.reason = "Resume generation not implemented yet!"
+                        raise BotClientException(self.exception_data.reason, self.exception_data)
 
                     BrowserClient.upload_file(form_field.element, resume_path)
 
                 case FieldTypeEnum.UPLOAD_COVER:
-                    self.error_message = "Cover letter upload not implemented yet!"
-                    return False
+                    self.exception_data.reason = "Cover letter upload not implemented yet!"
+                    raise BotClientException(self.exception_data.reason, self.exception_data)
 
                 case FieldTypeEnum.CARDS:
                     logger.info("Cards page, skipping")
 
                 case FieldTypeEnum.CHECKBOX:
+                    # TODO: Checkboxes are weird, should I compare answer to label, and then set it?
                     answer = self.__try_no_llm_answer(form_field.type, form_field.label, form_field.data)
                     if answer:
                         logger.info("Saved a cent!\n"
                                     f"The question: {form_field.label}\n"
                                     f"Local answer: {answer}")
-
                     else:
-                        res, answer = self.llm_client.answer_with_options(form_field.label, form_field.data)
-                        if not res:
-                            self.error_message = (f"LLM did not produce answer.\n"
-                                                  f"Question was: {form_field.label}")
-                            return False
+                        self.llm_client.answer_with_options(form_field.label, form_field.data)
 
                     BrowserClient.set_checkbox_field(form_field.element)
 
                 case _:
-                    self.error_message = f"LinkedIn client got field type it doesn't recognize ({form_field.type})"
-                    return False
-
-        return True
+                    self.exception_data.reason = (f"LinkedIn client got field type it doesn't recognize "
+                                                  f"({form_field.type})")
+                    raise BotClientException(self.exception_data.reason, self.exception_data)
 
     def start(self) -> None:
         self.browser_client.initialize()
 
         search_url_list = self.browser_client.make_search_urls()
+
+        current_job = Job()
 
         if search_url_list:
             for search_url in search_url_list:
@@ -247,36 +222,48 @@ class LinkedInClient:
                     # Jobs on page loop
                     while True:
                         try:
-                            self.current_job = job_generator.__next__()
-                            if self.current_job is None:
+                            current_job = job_generator.__next__()
+
+                            if current_job is None:
                                 break
-                            if self.current_job.applied:
+                            if current_job.applied:
                                 logger.info("Already applied, skipping")
                                 continue
-                            if self.__is_title_or_company_blacklisted():
+                            if self.__is_title_or_company_blacklisted(current_job):
                                 continue
 
-                            self.browser_client.get_job_description_and_hiring_team(self.current_job)
+                            self.exception_data.job_title = current_job.title
+                            self.exception_data.job_link = current_job.link
+
+                            self.browser_client.get_job_description_and_hiring_team(current_job)
 
                             form_element = self.browser_client.get_easy_apply_form()
 
-                            if not self.__apply_to_job(form_element):
-                                exception_data = (
-                                    EasyApplyExceptionData(job_title=self.current_job.title,
-                                                           job_link=self.current_job.link,
-                                                           reason=self.error_message))
-                                raise EasyApplyException(exception_data.reason, exception_data)
+                            self.__apply_to_job(form_element, current_job)
 
                             self.browser_client.finalize_easy_apply()
 
-                            self.custom_logger.log_success(self.current_job)
+                            self.custom_logger.log_success(current_job)
 
                             wait_extra(extra_range_sec=NEXT_JOB_APPLICATION_DELAY)
 
-                        except EasyApplyException as ex:
+                        except (BrowserClientException, BotClientException) as ex:
                             self.custom_logger.log_error(ex.data)
                             logger.error("Easy Apply failed!\n"
-                                         f"Reason: {ex.data.reason}")
+                                         f"{ex.data}")
+                            # If bail out fails - everything fails and bot dies :)
+                            self.browser_client.bail_out()
+                            continue
+
+                        except LLMException as ex:
+                            # LLM exception can only be raised when answering form fields,
+                            # that means job is already found
+                            ex.data.job_title = current_job.title
+                            ex.data.job_link = current_job.link
+
+                            self.custom_logger.log_error(ex.data)
+                            logger.error("Easy Apply failed!\n"
+                                         f"{ex.data}")
                             # If bail out fails - everything fails and bot dies :)
                             self.browser_client.bail_out()
                             continue

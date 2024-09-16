@@ -1,22 +1,34 @@
 from dataclasses import dataclass
+from utils import PrettyPrintable
 
 
+# Here packed info that could be useful, filled when available
 @dataclass
-class EasyApplyExceptionData:
-    job_title: str = ""
-    job_link: str = ""
+class CustomExceptionData(PrettyPrintable):
     reason: str = ""
 
+    page_url: str = ""
 
-class LoginFailException(Exception):
-    pass
+    job_title: str = ""
+    job_link: str = ""
+
+    llm_question: str = ""
+    llm_answer: str = ""
 
 
-class JobListException(Exception):
-    pass
+class BrowserClientException(Exception):
+    def __init__(self, message: str, data: CustomExceptionData):
+        super().__init__(message)
+        self.data = data
 
 
-class EasyApplyException(Exception):
-    def __init__(self, message: str, data: EasyApplyExceptionData):
+class BotClientException(Exception):
+    def __init__(self, message: str, data: CustomExceptionData):
+        super().__init__(message)
+        self.data = data
+
+
+class LLMException(Exception):
+    def __init__(self, message: str, data: CustomExceptionData):
         super().__init__(message)
         self.data = data

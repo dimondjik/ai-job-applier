@@ -12,12 +12,6 @@ for name, logger in logging.root.manager.loggerDict.items():
 #  Add postal code = something, numbers
 #  Add cover letter...
 
-# TODO: Job object is duplicated in linkedin and browser clients!
-#  Do something with it...
-
-# TODO: Exceptions are wildly inconsistent, some are critical, others can be skipped
-#  Think about better structure
-
 if __name__ == '__main__':
     bot = LinkedInClient()
     bot.start()
