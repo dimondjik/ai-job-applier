@@ -1,6 +1,9 @@
 import time
 import random
 from textwrap import indent
+import logging
+
+logger = logging.getLogger("Delays")
 
 
 # Base class with pretty print function, supports nested classes who also have PrettyPrintable as a base class
@@ -67,6 +70,9 @@ def wait_for(condition_func, timeout=4, check_delay_sec=0.1):
     :param check_delay_sec: frequency at which condition_func will be called
     :return: False if timed out, True if condition_func succeeded before timeout
     """
+
+    logger.info(f"Using wait_for to wait for a condition, timeout is {timeout} seconds")
+
     start_time = time.time()
     while time.time() < start_time + timeout:
         if condition_func():
@@ -83,7 +89,12 @@ def wait_extra(extra_range_sec=(2., 4.)):
 
     :param extra_range_sec: range for randomizing amount of seconds to wait
     """
-    time.sleep(random.uniform(*extra_range_sec))
+
+    delay = random.uniform(*extra_range_sec)
+    logger.info(f"Using wait_extra to wait for {round(delay, 1)} seconds "
+                f"(between {extra_range_sec[0]} to {extra_range_sec[1]} seconds)")
+
+    time.sleep(delay)
 
 
 def wait_for_extra(condition_func, timeout=4, check_delay_sec=0.1, extra_range_sec=(2., 4.)):

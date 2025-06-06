@@ -7,3 +7,4 @@ from .user_info import (UserInfo,
                         Project, Achievement, Certification, Language,
                         SelfIdentification, LegalAuthorization, WorkPreferences)
 from .blacklist import Blacklist, BlacklistEnum
+from .linkedin_xpaths import LinkedinXPaths

@@ -291,22 +291,25 @@ class BrowserClient:
         MUST be called on login page!
         """
 
+        # Apparently, when trying to navigate feed it takes you to the login page
+        # (the one with email and passwords fields, and not the "fancy" one with "Sign in" in the top right corner)
         try:
-            sign_in_button = self.driver.find_element(By.XPATH, "//button[@aria-label=\"Sign in\"]")
+            sign_in_button = self.driver.find_element(By.XPATH, self.config.linkedin_xpaths.login_sign_in_button)
         except NoSuchElementException:
             self.exception_data.page_url = self.driver.current_url
             self.exception_data.reason = "Login function called on non-login page"
             raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
         try:
-            email_field = self.driver.find_element(By.XPATH, "//input[@id=\"username\"]")
+            email_field = self.driver.find_element(By.XPATH, self.config.linkedin_xpaths.login_email_field)
             email_field.send_keys(self.config.linkedin_email)
             wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
         except NoSuchElementException:
+            # It sometimes happens when linkedin remembers you since the last session?
             logger.info("Can't find \"Email or phone\" field. Assuming only password is needed")
 
         try:
-            password_field = self.driver.find_element(By.XPATH, "//input[@id=\"password\"]")
+            password_field = self.driver.find_element(By.XPATH, self.config.linkedin_xpaths.login_password_field)
             password_field.send_keys(self.config.linkedin_pass)
             wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
         except NoSuchElementException:
@@ -374,12 +377,7 @@ class BrowserClient:
                                                 JOB_LIST_LOAD_TIMEOUT,
                                                 ignored_exceptions=ignored_exceptions).until(
                 ec.visibility_of_all_elements_located((By.XPATH,
-                                                       "//div[contains(@class, "
-                                                       "\"jobs-search-results-list\")]"
-                                                       "/ul[contains(@class, "
-                                                       "\"scaffold-layout__list-container\")]"
-                                                       "/li[contains(@class, "
-                                                       "\"jobs-search-results__list-item\")]"))))
+                                                       self.config.linkedin_xpaths.search_results_list_item))))
         except TimeoutException:
             self.exception_data.reason = "Job search result list element not found"
             raise BrowserClientException(self.exception_data.reason, self.exception_data)
@@ -394,12 +392,7 @@ class BrowserClient:
                                           JOB_LIST_LOAD_TIMEOUT,
                                           ignored_exceptions=ignored_exceptions).until(
                     ec.visibility_of_all_elements_located((By.XPATH,
-                                                           "//div[contains(@class, "
-                                                           "\"jobs-search-results-list\")]"
-                                                           "/ul[contains(@class, "
-                                                           "\"scaffold-layout__list-container\")]"
-                                                           "/li[contains(@class, "
-                                                           "\"jobs-search-results__list-item\")]")))
+                                                           self.config.linkedin_xpaths.search_results_list_item)))
             except TimeoutException:
                 self.exception_data.reason = "Job search result list element not found"
                 raise BrowserClientException(self.exception_data.reason, self.exception_data)
@@ -418,7 +411,7 @@ class BrowserClient:
         try:
             # Try to find no jobs banner, if not found and exception thrown - that's great,
             # means that something is found
-            self.driver.find_element(By.CLASS_NAME, "jobs-search-no-results-banner")
+            self.driver.find_element(By.CLASS_NAME, self.config.linkedin_xpaths.search_no_jobs_found_class)
             logger.info("No jobs found")
             return False
         except NoSuchElementException:
@@ -427,7 +420,7 @@ class BrowserClient:
     def get_page_jobs(self, url: str, page: int) -> Generator[Job | None, None, None] | None:
         """
 
-        :param url: Search url, should contain element with class "jobs-search-results-list"
+        :param url: Search url
         :param page:
         :return:
         """
@@ -462,44 +455,59 @@ class BrowserClient:
             # Double getting job items, since when we scroll some elements go stale,
             # because they are updated with job info by the website
 
-            # Removed second check, hope that LinkedIn would give info about next job in time
+            # Commented out second job get, hope that LinkedIn would give info about next job in time
             # Seems like it works
+
+            # YEAH, OF COURSE, THANKS
+            # After we click a job in the list for the first time
+            #  there's a non-zero chance that the whole list will go stale
+            # Why? I don't know
+            # At least scroll still works fine, adding a second job get back, but only on the first iteration
+            if i == 0:
+                logger.debug("First iteration through job list: List refresh workaround!")
+                job_item = self.__get_jobs_list()[i]
+
+                # Click on job item, no need to scroll, it's the first item
+                self.actions.click(job_item).perform()
+                logger.debug("First iteration through job list: Refresh should go away now...")
 
             job_item = self.__get_jobs_list()[i]
 
             self.__scroll_to_element(job_item)
 
-            # job_item = self.__get_jobs_list()[i]
-
-            logger.debug("Clicked on the job in the list")
-
             # Click on job item
             self.actions.click(job_item).perform()
+
+            logger.debug("Clicked on the job in the list")
 
             # Let the right bar load
             wait_extra(extra_range_sec=JOB_LIST_CLICK_DELAY)
 
+            # Mainly for logging purposes (clear before getting new data_
+            self.exception_data.job_title = ""
+            self.exception_data.job_link = ""
+
             try:
                 # Don't really need another variable, this is just for logging purposes
-                job_data = Job(title=job_item.find_element(By.XPATH,
-                                                           ".//a[contains(@class, \"job-card-list__title\")]"
-                                                           ).get_attribute("aria-label"),
-                               company=job_item.find_element(By.XPATH,
-                                                             ".//span[contains(@class, "
-                                                             "\"job-card-container__primary-description\")]"
-                                                             ).text,
-                               location=job_item.find_element(By.XPATH,
-                                                              ".//li[contains(@class, "
-                                                              "\"job-card-container__metadata-item\")]"
-                                                              ).text,
-                               link=job_item.find_element(By.XPATH,
-                                                          ".//a[contains(@class, \"job-card-list__title\")]"
-                                                          ).get_attribute("href"))
+                job_data = Job(
+                    title=job_item.find_element(By.XPATH,
+                                                self.config.linkedin_xpaths.search_results_list_item_title
+                                                ).text,
+                    company=job_item.find_element(By.XPATH,
+                                                  self.config.linkedin_xpaths.search_results_list_item_company
+                                                  ).text,
+                    location=job_item.find_element(By.XPATH,
+                                                   self.config.linkedin_xpaths.search_results_list_item_location
+                                                   ).text,
+                    link=job_item.find_element(By.XPATH,
+                                               self.config.linkedin_xpaths.search_results_list_item_link
+                                               ).get_attribute("href")
+                )
 
                 try:
                     job_data.applied = (True if job_item.find_element(
                         By.XPATH,
-                        ".//li[contains(@class, \"job-card-container__footer-job-state\")]").text == "Applied"
+                        self.config.linkedin_xpaths.search_results_list_item_footer)
                                         else False)
                 except NoSuchElementException:
                     job_data.applied = False
@@ -535,15 +543,14 @@ class BrowserClient:
 
         try:
             job_data.desc = self.driver.find_element(
-                By.XPATH, "//article[contains(@class, \"jobs-description__container\")]").text
+                By.XPATH, self.config.linkedin_xpaths.search_job_description).text
         except NoSuchElementException:
             self.exception_data.reason = "Can't find job description"
             raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
         try:
             job_data.hr = self.driver.find_element(
-                By.XPATH, "//div[contains(@class, \"hirer-card__hirer-information\")]"
-                          "/a[contains(@href, \"https://www.linkedin.com/\")]").get_attribute("href")
+                By.XPATH, self.config.linkedin_xpaths.search_job_hiring_team).get_attribute("href")
         except NoSuchElementException:
             logger.debug("Can't find HR link, that's not essential")
             pass
@@ -559,12 +566,12 @@ class BrowserClient:
 
             self.actions.click(
                 self.driver.find_element(
-                    By.XPATH, "//button[contains(@aria-label, \"Continue to next step\") "
-                              "and ./span[contains(., \"Next\")]]")).perform()
+                    By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog_advance_button)).perform()
 
             form_element = WebDriverWait(self.driver, EASY_APPLY_FORM_TIMEOUT,
                                          ignored_exceptions=ignored_exceptions).until(
-                ec.visibility_of_element_located((By.XPATH, "//div[contains(@class, \"jobs-easy-apply-modal\")]")))
+                ec.visibility_of_element_located((By.XPATH,
+                                                  self.config.linkedin_xpaths.easy_apply_dialog)))
 
             logger.info("Advancing the Easy Apply form")
 
@@ -591,22 +598,21 @@ class BrowserClient:
             # Click Review button
             self.exception_data.reason = "Finalize Easy apply failed: No Review button found!"
             next_button = self.driver.find_element(
-                By.XPATH, "//button[contains(@aria-label, \"Review your application\") "
-                          "and ./span[contains(., \"Review\")]]")
+                By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog_review_button)
             self.__scroll_to_element(next_button)
             self.actions.click(next_button).perform()
 
             self.exception_data.reason = "Finalize Easy apply failed: No form element found!"
             WebDriverWait(self.driver, EASY_APPLY_FORM_TIMEOUT,
                           ignored_exceptions=ignored_exceptions).until(
-                ec.visibility_of_element_located((By.XPATH, "//div[contains(@class, \"jobs-easy-apply-modal\")]")))
+                ec.visibility_of_element_located((By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog)))
 
             wait_extra(extra_range_sec=EASY_APPLY_SUBMIT_STEP_DELAY)
 
             # Unfollow company (this is optional on page)
             try:
                 next_button = self.driver.find_element(
-                    By.XPATH, "//input[@id=\"follow-company-checkbox\" and @type=\"checkbox\"]/../label")
+                    By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog_unfollow_company)
                 self.__scroll_to_element(next_button)
                 self.actions.click(next_button).perform()
                 logger.info("Successfully unfollowed company")
@@ -618,8 +624,7 @@ class BrowserClient:
             # Submit
             self.exception_data.reason = "Finalize Easy apply failed: No Submit application button found!"
             next_button = self.driver.find_element(
-                By.XPATH, "//button[contains(@aria-label, \"Submit application\") "
-                          "and ./span[contains(., \"Submit application\")]]")
+                By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog_submit_button)
             self.__scroll_to_element(next_button)
             self.actions.click(next_button).perform()
 
@@ -630,13 +635,13 @@ class BrowserClient:
             self.exception_data.reason = "Finalize Easy apply failed: No Popup alert found!"
             any_dialog = WebDriverWait(self.driver, EASY_APPLY_POPUP_DETECT_TIMEOUT,
                                        ignored_exceptions=ignored_exceptions).until(
-                ec.visibility_of_element_located((By.XPATH, "//div[@role=\"dialog\"]")))
+                ec.visibility_of_element_located((By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog_popup)))
 
             # Closing popup dialog
             self.exception_data.reason = "Finalize Easy apply failed: Can't find popup close button!"
             self.actions.click(
                 any_dialog.find_element(
-                    By.XPATH, ".//button[@aria-label=\"Dismiss\"]")).perform()
+                    By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog_popup_dismiss_button)).perform()
             logger.info("Successfully closed popup")
 
             logger.info(f"Successful {self.exception_data.job_title} application!")
@@ -660,13 +665,13 @@ class BrowserClient:
             self.exception_data.reason = "Bail out failed: No form element found!"
             form_element = WebDriverWait(self.driver, EASY_APPLY_FORM_TIMEOUT,
                                          ignored_exceptions=ignored_exceptions).until(
-                ec.visibility_of_element_located((By.XPATH, "//div[contains(@class, \"jobs-easy-apply-modal\")]")))
+                ec.visibility_of_element_located((By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog)))
 
             # Closing form
             self.exception_data.reason = "Bail out failed: No form close button found!"
             self.actions.click(
                 form_element.find_element(
-                    By.XPATH, ".//button[@aria-label=\"Dismiss\"]")).perform()
+                    By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog_close_button)).perform()
 
             wait_extra(extra_range_sec=BAIL_OUT_STEP_DELAY)
 
@@ -674,13 +679,13 @@ class BrowserClient:
             self.exception_data.reason = "Bail out failed: No Save dialog alert found!"
             save_dialog = WebDriverWait(self.driver, EASY_APPLY_POPUP_DETECT_TIMEOUT,
                                         ignored_exceptions=ignored_exceptions).until(
-                ec.visibility_of_element_located((By.XPATH, "//div[@role=\"alertdialog\"]")))
+                ec.visibility_of_element_located((By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog_save_alert)))
 
             # Discard application
             self.exception_data.reason = "Bail out failed: No Discard button found in Save alert dialog!"
             self.actions.click(
                 save_dialog.find_element(
-                    By.XPATH, ".//button[./span[text()[contains(., \"Discard\")]]]")).perform()
+                    By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog_save_alert_discard_button)).perform()
 
             wait_extra(extra_range_sec=BAIL_OUT_STEP_DELAY)
 
@@ -702,8 +707,7 @@ class BrowserClient:
             self.actions.click(
                 self.driver.find_element(
                     By.XPATH,
-                    "//button[contains(@class, \"jobs-apply-button\") "
-                    "and ./span[contains(., \"Easy Apply\")]]")).perform()
+                    self.config.linkedin_xpaths.search_easy_apply_button)).perform()
         except NoSuchElementException:
             self.exception_data.reason = "No Easy Apply button found"
             raise BrowserClientException(self.exception_data.reason, self.exception_data)
@@ -712,7 +716,7 @@ class BrowserClient:
             form_element = WebDriverWait(self.driver,
                                          EASY_APPLY_FORM_TIMEOUT,
                                          ignored_exceptions=ignored_exceptions).until(
-                ec.visibility_of_element_located((By.XPATH, "//div[contains(@class, \"jobs-easy-apply-modal\")]")))
+                ec.visibility_of_element_located((By.XPATH, self.config.linkedin_xpaths.easy_apply_dialog)))
         except TimeoutException:
             self.exception_data.reason = "No Easy Apply form appeared"
             raise BrowserClientException(self.exception_data.reason, self.exception_data)
@@ -735,20 +739,15 @@ class BrowserClient:
         # XPath is from field element root
         label_xpath_variations = [
             # Found near text inputs
-            ".//label[contains(@class, "
-            "\"artdeco-text-input--label\")]",  # noqa
-            # Found near list inputs
-            ".//label[contains(@class, "
-            "\"fb-dash-form-element__label\")]",
-            # Found near checkboxes
-            ".//div[contains(@class, "
-            "\"fb-dash-form-element__label\")]",
-            # Found near radio buttons
-            ".//span[contains(@class, "
-            "\"fb-dash-form-element__label\")]",
+            self.config.linkedin_xpaths.easy_apply_element_textbox_label,
             # Once found near a text input
-            "../..//span[contains(@class, "
-            "\"jobs-easy-apply-form-section__group-title\")]",
+            self.config.linkedin_xpaths.easy_apply_element_textbox_label_2,
+            # Found near list inputs
+            self.config.linkedin_xpaths.easy_apply_element_dropdown_label,
+            # Found near checkboxes
+            self.config.linkedin_xpaths.easy_apply_element_checkbox_label,
+            # Found near radio buttons
+            self.config.linkedin_xpaths.easy_apply_element_radio_label,
         ]
 
         field_label = ""
@@ -780,28 +779,54 @@ class BrowserClient:
         search_variations = [
             # Dropdown list
             {'type': FieldTypeEnum.LIST,
-             'element_func': (lambda: field_element.find_element(By.XPATH, ".//select")),
-             'data_func': (lambda: [o.get_attribute("value") for o in
-                                    field_element.find_elements(By.XPATH, ".//select/option")])},
+             'element_func':
+                 (lambda:
+                  field_element.find_element(By.XPATH,
+                                             self.config.linkedin_xpaths.easy_apply_element_dropdown_element)),
+             'data_func':
+                 (lambda:
+                  [o.get_attribute("value") for o in
+                   field_element.find_elements(By.XPATH,
+                                               self.config.linkedin_xpaths.easy_apply_element_dropdown_data)])},
             # Text input
             {'type': FieldTypeEnum.INPUT,
-             'element_func': (lambda: field_element.find_element(By.XPATH, ".//input[@type=\"text\"]")),
-             'data_func': (lambda: None)},
+             'element_func':
+                 (lambda:
+                  field_element.find_element(By.XPATH,
+                                             self.config.linkedin_xpaths.easy_apply_element_textbox_element)),
+             'data_func':
+                 (lambda:
+                  None)},
             # Text input variation
             {'type': FieldTypeEnum.INPUT,
-             'element_func': (lambda: field_element.find_element(By.XPATH, ".//textarea")),
-             'data_func': (lambda: None)},
+             'element_func':
+                 (lambda:
+                  field_element.find_element(By.XPATH,
+                                             self.config.linkedin_xpaths.easy_apply_element_textbox_element_2)),
+             'data_func':
+                 (lambda:
+                  None)},
             # Checkbox
             {'type': FieldTypeEnum.CHECKBOX,
-             'element_func': (lambda: field_element.find_element(By.XPATH,
-                                                                 ".//input[@type=\"checkbox\"]/../label")),
-             'data_func': (lambda: [field_element.find_element(By.XPATH,
-                                                               ".//input[@type=\"checkbox\"]/../label").text])},
+             'element_func':
+                 (lambda:
+                  field_element.find_element(By.XPATH,
+                                             self.config.linkedin_xpaths.easy_apply_element_checkbox_element)),
+             'data_func':
+                 (lambda:
+                  [field_element.find_element(By.XPATH,
+                                              self.config.linkedin_xpaths.easy_apply_element_checkbox_data).text])},
             # Radio button
             {'type': FieldTypeEnum.RADIO,
-             'element_func': (lambda: field_element),
-             'data_func': (lambda: [o.find_element(By.XPATH, "../label").text for o in
-                                    field_element.find_elements(By.XPATH, ".//input[@type=\"radio\"]")])},
+             'element_func':
+                 (lambda:
+                  field_element),
+             'data_func':
+                 (lambda:
+                  [o.find_element(By.XPATH,
+                                  self.config.linkedin_xpaths.easy_apply_element_radio_data).text for o in
+                   field_element.find_elements(By.XPATH,
+                                               self.config.linkedin_xpaths.easy_apply_element_radio_root)])},
         ]
 
         form_field_element = None
@@ -824,10 +849,10 @@ class BrowserClient:
             self.exception_data.reason = "Can't find Easy Apply form's field data"
             raise BrowserClientException(self.exception_data.reason, self.exception_data)
 
-    @staticmethod
-    def __get_upload_fields_data(form_element: WebElement) -> list[Field]:
+    def __get_upload_fields_data(self, form_element: WebElement) -> list[Field]:
         try:
-            upload_buttons = form_element.find_elements(By.XPATH, ".//div[./input[@type=\"file\"]]")
+            upload_buttons = form_element.find_elements(By.XPATH,
+                                                        self.config.linkedin_xpaths.easy_apply_element_upload_container)
 
             upload_data_list = []
 
@@ -846,7 +871,8 @@ class BrowserClient:
                     continue
 
                 # Actual invisible upload element
-                upload_data.element = button.find_element(By.XPATH, ".//input[@type=\"file\"]")
+                upload_data.element = button.find_element(By.XPATH,
+                                                          self.config.linkedin_xpaths.easy_apply_element_upload_input)
                 upload_data_list.append(upload_data)
 
             return upload_data_list
@@ -866,10 +892,11 @@ class BrowserClient:
         #  it will skip page comprised of unknown fields possibly breaking everything, rethink that
 
         # It's fine, it will fail later if anything, or magically work ^_^
+        # It failed and was a nightmare to debug, why did I do this to myself :(
         while True:
             # Find form elements
             easy_apply_form_fields = form_element.find_elements(
-                By.XPATH, "//div[contains(@class, \"jobs-easy-apply-form-element\")]")
+                By.XPATH, self.config.linkedin_xpaths.easy_apply_element_common)
 
             # If found any input fields
             if easy_apply_form_fields:
@@ -904,12 +931,11 @@ class BrowserClient:
                 for upload_field in upload_fields:
                     yield upload_field
 
-            # If not assuming that's cards page, as far as I know it has the unique container
+            # If not assuming that's cards page, as far as I know it has a unique container
             else:
                 try:
                     form_element.find_element(
-                        By.XPATH, ".//form["
-                                  "./div[contains(@class, \"jobs-easy-apply-repeatable-groupings__groupings\")]]")
+                        By.XPATH, self.config.linkedin_xpaths.easy_apply_cards_container)
                     yield Field(type=FieldTypeEnum.CARDS)
                 except NoSuchElementException:
                     pass
@@ -967,8 +993,7 @@ class BrowserClient:
         upload_field.send_keys(abspath)
         wait_extra(extra_range_sec=EASY_APPLY_FIELD_UPLOAD_DELAY)
 
-    @staticmethod
-    def set_radio_field(radio_field: WebElement, value: str) -> None:
+    def set_radio_field(self, radio_field: WebElement, value: str) -> None:
         """
         Click element from WebElement, assuming that is radio buttons container, with corresponding value
 
@@ -983,7 +1008,8 @@ class BrowserClient:
         # I guess that's fine, just how modern internet works now :)
         # radio_field.find_element(By.XPATH, f".//input[@type=\"radio\" and @value=\"{value}\"]").click()
 
-        radio_field.find_element(By.XPATH, f".//label[text()[contains(., \"{value}\")]]").click()
+        radio_field.find_element(By.XPATH,
+                                 self.config.linkedin_xpaths.easy_apply_element_radio_find.format(value=value)).click()
         wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
 
     @staticmethod
@@ -1009,9 +1035,10 @@ class BrowserClient:
         :param value: value to set
         """
 
-        target_element = suggestions_element.find_element(By.XPATH,
-                                                          f".//div[@role=\"option\" and "
-                                                          f".//span[text()[contains(., \"{value}\")]]]")
+        target_element = (
+            suggestions_element
+            .find_element(By.XPATH,
+                          self.config.linkedin_xpaths.easy_apply_textbox_suggestions_find.format(value=value)))
         self.__scroll_to_element(target_element)
         self.actions.click(target_element).perform()
         wait_extra(extra_range_sec=EASY_APPLY_FIELD_INPUT_DELAY)
@@ -1029,13 +1056,16 @@ class BrowserClient:
             suggestions_element = WebDriverWait(self.driver,
                                                 EASY_APPLY_SUGGESTION_BOX_TIMEOUT,
                                                 ignored_exceptions=ignored_exceptions).until(
-                ec.visibility_of_element_located((By.XPATH, ".//div[@role=\"listbox\" and .//div[@role=\"option\"]]")))
+                ec.visibility_of_element_located((By.XPATH,
+                                                  self.config.linkedin_xpaths.easy_apply_textbox_suggestions)))
         except TimeoutException:
             logger.debug("Suggestions not found")
             return None, None
 
         logger.info("Text field suggestions appeared")
-        suggestions_options = [o.text for o in
-                               suggestions_element.find_elements(By.XPATH, ".//div[@role=\"option\"]")]
+        suggestions_options = \
+            [o.text for o in
+             suggestions_element.find_elements(By.XPATH,
+                                               self.config.linkedin_xpaths.easy_apply_textbox_suggestions_data)]
 
         return suggestions_element, suggestions_options

@@ -58,9 +58,9 @@ class LinkedInClient:
                 answer = self.config.user_info.personal.linkedin
 
         elif field_type == FieldTypeEnum.LIST:
-            if field_label == "Phone country code\nPhone country code":
+            if field_label == "Phone country code":
                 answer = next((a for a in field_options if self.config.user_info.personal.phone_prefix in a), "")
-            elif field_label == "Email address\nEmail address":
+            elif field_label == "Email address":
                 answer = next((a for a in field_options if self.config.user_info.personal.email == a), "")
 
         elif field_type == FieldTypeEnum.CHECKBOX:
@@ -126,8 +126,10 @@ class LinkedInClient:
     # def debug_apply_to_specific_job(self, url):
     #     self.browser_client.initialize()
     #     self.browser_client.driver.get(url)
+    #     for _ in range(99999):
+    #         pass
     #     form_element = self.browser_client.get_easy_apply_form()
-    #     self.__apply_to_job(form_element)
+    #     self.__apply_to_job(form_element, Job())
 
     def __apply_to_job(self, easy_apply_form, job_object):
         for form_field in self.browser_client.get_form_fields(easy_apply_form):
@@ -145,12 +147,12 @@ class LinkedInClient:
                     else:
                         answer = self.llm_client.answer_with_options(form_field.label, form_field.data)
 
-                    BrowserClient.set_dropdown_field(form_field.element, answer)
+                    self.browser_client.set_dropdown_field(form_field.element, answer)
 
                 case FieldTypeEnum.RADIO:
                     answer = self.llm_client.answer_with_options(form_field.label, form_field.data)
 
-                    BrowserClient.set_radio_field(form_field.element, answer)
+                    self.browser_client.set_radio_field(form_field.element, answer)
 
                 case FieldTypeEnum.INPUT:
                     answer = self.__try_no_llm_answer(form_field.type, form_field.label, form_field.data)
@@ -161,7 +163,7 @@ class LinkedInClient:
                     else:
                         answer = self.llm_client.answer_freely(form_field.label)
 
-                    BrowserClient.set_input_field(form_field.element, answer)
+                    self.browser_client.set_input_field(form_field.element, answer)
 
                     # In a text input field a suggestions list can appear, check every time
                     (suggestions_element,
@@ -179,7 +181,7 @@ class LinkedInClient:
                         self.exception_data.reason = "Resume generation not implemented yet!"
                         raise BotClientException(self.exception_data.reason, self.exception_data)
 
-                    BrowserClient.upload_file(form_field.element, resume_path)
+                    self.browser_client.upload_file(form_field.element, resume_path)
 
                 case FieldTypeEnum.UPLOAD_COVER:
                     self.exception_data.reason = "Cover letter upload not implemented yet!"
@@ -198,7 +200,7 @@ class LinkedInClient:
                     else:
                         self.llm_client.answer_with_options(form_field.label, form_field.data)
 
-                    BrowserClient.set_checkbox_field(form_field.element)
+                    self.browser_client.set_checkbox_field(form_field.element)
 
                 case _:
                     self.exception_data.reason = (f"LinkedIn client got field type it doesn't recognize "

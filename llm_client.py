@@ -1,4 +1,5 @@
 from langchain_openai import ChatOpenAI
+from langchain_deepseek import ChatDeepSeek
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
 from config_manager import ConfigManager, FewShotPrompt
@@ -29,9 +30,27 @@ class ChatOpenAIWrapper:
         return self.invoke(messages)
 
 
+class ChatDeepSeekWrapper:
+    def __init__(self):
+        """
+        Langchain's ChatDeepSeek class with some additional functionality  
+        """  # noqa
+
+        self.config = ConfigManager()
+        self.llm_chat = ChatDeepSeek(model="deepseek-chat",
+                                     api_key=self.config.deepseek_api_key)
+
+    def invoke(self, messages):
+        logger.info("Calling DeepSeek")
+        return self.llm_chat.invoke(messages)
+
+    def __call__(self, messages):
+        return self.invoke(messages)
+
+
 class LLMClient:
     def __init__(self):
-        self.llm_chat = ChatOpenAIWrapper()
+        self.llm_chat = ChatDeepSeekWrapper()
         self.config = ConfigManager()
         self.no_answer_keyword = "CANDIDATE_NO_DATA"
         self.key_tag = "ANSWER"
@@ -157,7 +176,7 @@ class LLMClient:
             answer = chain.invoke({"resume": str(self.config.user_info),
                                    "question": question})
 
-            logger.warning(f"OpenAI call cost: {cb.total_cost}")
+            logger.warning(f"Call cost: {cb.total_cost}")
 
         logger.info(f"The question: {question}\n"
                     f"LLM answer: {answer}")
@@ -189,7 +208,7 @@ class LLMClient:
                                    "question": question,
                                    "options": str(options)})
 
-            logger.warning(f"OpenAI call cost: {cb.total_cost}")
+            logger.warning(f"Call cost: {cb.total_cost}")
 
         logger.info(f"The question: {question}\n "
                     f"LLM answer: {answer}")
