@@ -20,6 +20,8 @@ class ConfigManager(metaclass=Singleton):
         self.prompt_answer_with_options: FewShotPrompt
         self.prompt_answer_freely: FewShotPrompt
 
+        self.prompt_cv_fill_in: FewShotPrompt
+
         self.user_info: UserInfo
 
         self.linkedin_xpaths: LinkedinXPaths
@@ -47,6 +49,8 @@ class ConfigManager(metaclass=Singleton):
             prompts_yaml = yaml.safe_load(f)
             self.prompt_answer_with_options = FewShotPrompt.from_prompts_yaml(prompts_yaml["answer_with_options"])
             self.prompt_answer_freely = FewShotPrompt.from_prompts_yaml(prompts_yaml["answer_freely"])
+
+            self.prompt_cv_fill_in = FewShotPrompt.from_prompts_yaml(prompts_yaml["cv_fill_in"])
 
         with open(os.path.join(os.getcwd(), "app_config", "user_info.yaml"), "r", encoding="UTF-8") as f:
             user_info_yaml = yaml.safe_load(f)

@@ -32,3 +32,9 @@ class LLMException(Exception):
     def __init__(self, message: str, data: CustomExceptionData):
         super().__init__(message)
         self.data = data
+
+
+class CVManagerException(Exception):
+    def __init__(self, message: str, data: CustomExceptionData):
+        super().__init__(message)
+        self.data = data

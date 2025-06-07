@@ -38,6 +38,7 @@ class UserInfo(PrettyPrintable):
         for ed in user_info.education:
             if ed.exams is not None:
                 ed.exams = [Exam(**ex) for ex in ed.exams.copy()]  # noqa
+        user_info.job_experience = [JobExperience(**ex) for ex in user_info.job_experience.copy()]  # noqa
         # hard_skills already a list of strings
         # soft_skills already a list of strings
         user_info.projects = [Project(**p) for p in user_info.projects.copy()]  # noqa

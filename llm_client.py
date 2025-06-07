@@ -2,11 +2,12 @@ from langchain_openai import ChatOpenAI
 from langchain_deepseek import ChatDeepSeek
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
-from config_manager import ConfigManager, FewShotPrompt
+from config_manager import ConfigManager
 from langchain_core.messages import AIMessage
 import logging
 from html.parser import HTMLParser
 from custom_exceptions import LLMException, CustomExceptionData
+from custom_types import *
 
 logger = logging.getLogger("LLMClient")
 
@@ -38,6 +39,7 @@ class ChatDeepSeekWrapper:
 
         self.config = ConfigManager()
         self.llm_chat = ChatDeepSeek(model="deepseek-chat",
+                                     temperature=0.32,
                                      api_key=self.config.deepseek_api_key)
 
     def invoke(self, messages):
@@ -129,11 +131,11 @@ class LLMClient:
             answer = ""
 
             def handle_starttag(self, tag, attrs):
-                if tag == "ANSWER":
+                if tag == "answer":
                     self.answer_data = True
 
             def handle_endtag(self, tag):
-                if tag == "ANSWER":
+                if tag == "answer":
                     self.answer_data = False
 
             def handle_data(self, data):
@@ -150,8 +152,10 @@ class LLMClient:
             self.exception_data.llm_answer = message_string
             raise LLMException(self.exception_data.reason, self.exception_data)
         else:
-            # TODO: Return with quick cleanup, expand if needed
-            return parser.answer.replace("\n", "").strip()
+            # Return with quick cleanup, expand if needed
+            # It should not be here!
+            # return parser.answer.replace("\n", "").strip()
+            return parser.answer
 
     # TODO: These two functions differ just by options field, can I combine it to one?
     def answer_freely(self, question: str) -> str:
@@ -177,6 +181,9 @@ class LLMClient:
                                    "question": question})
 
             logger.warning(f"Call cost: {cb.total_cost}")
+
+        # TODO: Return with quick cleanup, expand if needed
+        answer = answer.replace("\n", "").strip()
 
         logger.info(f"The question: {question}\n"
                     f"LLM answer: {answer}")
@@ -210,7 +217,45 @@ class LLMClient:
 
             logger.warning(f"Call cost: {cb.total_cost}")
 
+        # TODO: Return with quick cleanup, expand if needed
+        answer = answer.replace("\n", "").strip()
+
         logger.info(f"The question: {question}\n "
                     f"LLM answer: {answer}")
+
+        return answer
+
+    def cv_fill_in(self, job_data: Job, resume_part: str) -> str:
+        """
+        Answer on question from options provided
+
+        Boolean shows if LLM was able to answer a question
+
+        :param job_data:
+        :param resume_part:
+
+        :return: Call result and answer
+        """
+        prompt = self.__build_prompt(self.config.prompt_cv_fill_in)
+
+        logger.debug("Full LLM prompt: \n {}".format(
+            prompt.invoke({"resume_part": resume_part,
+                           "position": job_data.desc,
+                           "resume": str(self.config.user_info)})))
+
+        chain = prompt | self.llm_chat | self.__tag_parser
+
+        with get_openai_callback() as cb:
+            answer = chain.invoke({"resume_part": resume_part,
+                                   "position": job_data.desc,
+                                   "resume": str(self.config.user_info)})
+
+            logger.warning(f"Call cost: {cb.total_cost}")
+
+        # TODO: Return with quick cleanup, expand if needed
+        answer = answer.strip()
+
+        logger.info(f"Resume part: {resume_part}\n "
+                    f"LLM tailored part: {answer}")
 
         return answer

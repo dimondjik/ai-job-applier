@@ -2,13 +2,15 @@ import logging
 
 from browser_client import BrowserClient
 from config_manager import ConfigManager
+from cv_manager import CVManager
 from llm_client import LLMClient
 from utils import wait_extra
 from log_writer import LogWriter
 
 from custom_types import *
 
-from custom_exceptions import BrowserClientException, CustomExceptionData, BotClientException, LLMException
+from custom_exceptions import (BrowserClientException, CustomExceptionData,
+                               BotClientException, LLMException, CVManagerException)
 
 logger = logging.getLogger("LinkedInClient")
 
@@ -29,6 +31,7 @@ class LinkedInClient:
         self.config = ConfigManager()
         self.llm_client = LLMClient()
         self.custom_logger = LogWriter()
+        self.cv_manager = CVManager()
 
         self.exception_data = CustomExceptionData()
 
@@ -131,7 +134,7 @@ class LinkedInClient:
     #     form_element = self.browser_client.get_easy_apply_form()
     #     self.__apply_to_job(form_element, Job())
 
-    def __apply_to_job(self, easy_apply_form, job_object):
+    def __apply_to_job(self, easy_apply_form, resume_path):
         for form_field in self.browser_client.get_form_fields(easy_apply_form):
             if form_field is None:
                 break
@@ -175,12 +178,6 @@ class LinkedInClient:
                         self.browser_client.set_suggestions_list(suggestions_element, answer)
 
                 case FieldTypeEnum.UPLOAD_CV:
-                    resume_path = self.__get_local_resume_path_by_title(job_object)
-                    if not resume_path:
-                        # TODO: Generate resume with AI here
-                        self.exception_data.reason = "Resume generation not implemented yet!"
-                        raise BotClientException(self.exception_data.reason, self.exception_data)
-
                     self.browser_client.upload_file(form_field.element, resume_path)
 
                 case FieldTypeEnum.UPLOAD_COVER:
@@ -241,11 +238,19 @@ class LinkedInClient:
 
                             form_element = self.browser_client.get_easy_apply_form()
 
-                            self.__apply_to_job(form_element, current_job)
+                            resume_path = self.cv_manager.generate_cv_pdf(self.llm_client, current_job)
+
+                            # TODO: Should I leave local resume here?
+                            # resume_path = self.__get_local_resume_path_by_title(job_object)
+                            # if not resume_path:
+                            #     self.exception_data.reason = "Resume generation not implemented yet!"
+                            #     raise BotClientException(self.exception_data.reason, self.exception_data)
+
+                            self.__apply_to_job(form_element, resume_path)
 
                             self.browser_client.finalize_easy_apply()
 
-                            self.custom_logger.log_success(current_job)
+                            self.custom_logger.log_success(current_job, f"file:///{resume_path}")
 
                             wait_extra(extra_range_sec=NEXT_JOB_APPLICATION_DELAY)
 
@@ -257,8 +262,9 @@ class LinkedInClient:
                             self.browser_client.bail_out()
                             continue
 
-                        except LLMException as ex:
+                        except (LLMException, CVManagerException) as ex:
                             # LLM exception can only be raised when answering form fields,
+                            # and CV exception is thrown when we already opened the apply form,
                             # that means job is already found
                             ex.data.job_title = current_job.title
                             ex.data.job_link = current_job.link

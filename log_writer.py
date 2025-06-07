@@ -22,19 +22,21 @@ class LogWriter(metaclass=Singleton):
         open(self.success_path, "w", encoding="UTF-8").close()
         open(self.failed_path, "w", encoding="UTF-8").close()
 
-    def log_success(self, job_data: Job) -> None:
+    def log_success(self, job_data: Job, cv_pdf_path: str) -> None:
         """
         Write successful job application to log
 
         :param job_data: Job object
+        :param cv_pdf_path: Browser-valid path to the cv sent with this application
         """
         with open(self.success_path, "a", encoding="UTF-8") as f:
-            f.writelines("{} ({})\n"
-                         "{}\n"
-                         "Link: {}\n"
-                         "--------------------\n".format(job_data.title, job_data.company,
-                                                         job_data.location,
-                                                         job_data.link))
+            f.writelines(("{} ({})\n"
+                          "{}\n"
+                          "Link: {}\n"
+                          "CV: {}\n" + 120 * "-" + "\n").format(job_data.title, job_data.company,
+                                                                job_data.location,
+                                                                job_data.link,
+                                                                cv_pdf_path))
 
     def log_error(self, ex_data: CustomExceptionData) -> None:
         """
